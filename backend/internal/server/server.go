@@ -6,11 +6,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/auth"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/config"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/httpx"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/middleware"
-	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Server encapsulates the HTTP server, routing engine, database connection pool,
@@ -57,7 +58,7 @@ func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool) *Server {
 
 // mountRoutes registers all HTTP endpoints for the application.
 func (s *Server) mountRoutes() {
-	// Ping handler returns the operational health and identity of the API service
+	// Root-level ping handler
 	pingHandler := func(w http.ResponseWriter, r *http.Request) {
 		_ = httpx.WriteJSON(w, http.StatusOK, map[string]string{
 			"status": "ok",
@@ -65,7 +66,7 @@ func (s *Server) mountRoutes() {
 		})
 	}
 
-	// Health handler verifies connectivity to the PostgreSQL database with a 2-second timeout
+	// Database connectivity health check handler
 	healthHandler := func(w http.ResponseWriter, r *http.Request) {
 		if s.db == nil {
 			s.logger.Error("database health check failed: pool is nil")
@@ -91,10 +92,29 @@ func (s *Server) mountRoutes() {
 	// Root-level health check: GET /ping
 	s.router.Get("/ping", pingHandler)
 
+	// Dependency Injection: Initialize Auth components
+	tokenMgr := auth.NewTokenManager(s.cfg.JWTSecret)
+	authRepo := auth.NewPGRepository(s.db)
+	authService := auth.NewService(authRepo, tokenMgr)
+	authHandler := auth.NewHandler(authService, s.cfg.Env == "production")
+
 	// API v1 group: mounts endpoints under /api/v1
 	s.router.Route("/api/v1", func(r chi.Router) {
 		r.Get("/ping", pingHandler)
 		r.Get("/health", healthHandler)
+
+		// Auth group: /api/v1/auth
+		r.Route("/auth", func(r chi.Router) {
+			r.Post("/signup", authHandler.Signup)
+			r.Post("/login", authHandler.Login)
+			r.Post("/logout", authHandler.Logout)
+
+			// Protected routes requiring valid session cookie
+			r.Group(func(r chi.Router) {
+				r.Use(auth.RequireAuth(tokenMgr))
+				r.Get("/me", authHandler.Me)
+			})
+		})
 	})
 }
 

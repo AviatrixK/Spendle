@@ -73,11 +73,9 @@ func (c *Config) validate() error {
 		return fmt.Errorf("DATABASE_URL is required: environment variable is empty or not set")
 	}
 
-	// Fail-fast rule: in production, security secrets must never be omitted.
-	if c.Env == "production" {
-		if c.JWTSecret == "" {
-			return fmt.Errorf("JWT_SECRET is required when ENV is 'production'")
-		}
+	// JWT_SECRET is strictly required and must be at least 32 characters long across all environments
+	if len(c.JWTSecret) < 32 {
+		return fmt.Errorf("JWT_SECRET is required and must be at least 32 characters long (got %d chars)", len(c.JWTSecret))
 	}
 
 	return nil

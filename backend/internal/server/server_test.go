@@ -21,6 +21,7 @@ func TestPingEndpoints(t *testing.T) {
 		Port:           8080,
 		Env:            "test",
 		DatabaseURL:    "postgres://spendle:spendle@localhost:5432/spendle_db?sslmode=disable",
+		JWTSecret:      "test-secret-must-be-at-least-32-chars-long!",
 		FrontendOrigin: "http://localhost:5173",
 	}
 	// Discard log output during tests to keep test runs clean
@@ -65,6 +66,7 @@ func TestHealthEndpoint_DatabaseUnavailable(t *testing.T) {
 		Port:           8080,
 		Env:            "test",
 		DatabaseURL:    "postgres://spendle:spendle@localhost:5432/spendle_db?sslmode=disable",
+		JWTSecret:      "test-secret-must-be-at-least-32-chars-long!",
 		FrontendOrigin: "http://localhost:5173",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

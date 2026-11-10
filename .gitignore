@@ -38,3 +38,10 @@ Thumbs.db
 *.log
 tmp/
 
+# Test fixtures & session cookies
+cookies.txt
+signup.json
+login.json
+*.test.json
+
+
