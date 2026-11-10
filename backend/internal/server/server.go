@@ -9,9 +9,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/auth"
+	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/budget"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/config"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/httpx"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/middleware"
+	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/transaction"
 )
 
 // Server encapsulates the HTTP server, routing engine, database connection pool,
@@ -98,22 +100,53 @@ func (s *Server) mountRoutes() {
 	authService := auth.NewService(authRepo, tokenMgr)
 	authHandler := auth.NewHandler(authService, s.cfg.Env == "production")
 
+	// Dependency Injection: Initialize Budget components
+	budgetRepo := budget.NewPGRepository(s.db)
+	budgetService := budget.NewService(budgetRepo)
+	budgetHandler := budget.NewHandler(budgetService)
+
+	// Dependency Injection: Initialize Transaction components
+	txRepo := transaction.NewPGRepository(s.db)
+	txService := transaction.NewService(txRepo, budgetRepo)
+	txHandler := transaction.NewHandler(txService)
+
 	// API v1 group: mounts endpoints under /api/v1
 	s.router.Route("/api/v1", func(r chi.Router) {
+		// Public health endpoints
 		r.Get("/ping", pingHandler)
 		r.Get("/health", healthHandler)
 
-		// Auth group: /api/v1/auth
+		// Auth endpoints: /api/v1/auth
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/signup", authHandler.Signup)
 			r.Post("/login", authHandler.Login)
 			r.Post("/logout", authHandler.Logout)
 
-			// Protected routes requiring valid session cookie
+			// Protected auth route
 			r.Group(func(r chi.Router) {
 				r.Use(auth.RequireAuth(tokenMgr))
 				r.Get("/me", authHandler.Me)
 			})
+		})
+
+		// Protected domain routes: Categories, Budgets, Transactions
+		r.Group(func(r chi.Router) {
+			r.Use(auth.RequireAuth(tokenMgr))
+
+			// Category endpoints
+			r.Get("/categories", budgetHandler.ListCategories)
+			r.Post("/categories", budgetHandler.CreateCategory)
+			r.Delete("/categories/{id}", budgetHandler.DeleteCategory)
+
+			// Budget endpoints
+			r.Put("/budgets", budgetHandler.SetBudget)
+			r.Get("/budgets", budgetHandler.GetBudgets)
+
+			// Transaction endpoints
+			r.Post("/transactions", txHandler.Create)
+			r.Get("/transactions", txHandler.List)
+			r.Delete("/transactions/{id}", txHandler.Delete)
+			r.Get("/transactions/summary", txHandler.GetSummary)
 		})
 	})
 }

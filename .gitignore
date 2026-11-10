@@ -42,6 +42,12 @@ tmp/
 cookies.txt
 signup.json
 login.json
+category.json
+budget.json
+tx1.json
+tx2.json
+tx3.json
+bad_tx.json
 *.test.json
 
 
