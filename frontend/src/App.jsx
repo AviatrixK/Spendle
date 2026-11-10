@@ -1,10 +1,13 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { authApi } from './api';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Goals from './pages/Goals';
+
+// Lazy-load landing page so app bundle stays small
+const Landing = lazy(() => import('./landing/Landing'));
 
 /**
  * ProtectedRoute Guard
@@ -61,6 +64,44 @@ function PublicRoute({ children }) {
   return children;
 }
 
+/**
+ * HomeRoute Dispatcher
+ * Logged-out visitors see the editorial Landing page.
+ * Logged-in users see their live financial Dashboard.
+ */
+function HomeRoute() {
+  const { data: user, isLoading } = useQuery({
+    queryKey: ['auth', 'me'],
+    queryFn: authApi.me,
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-muted font-mono text-xs">
+        Loading...
+      </div>
+    );
+  }
+
+  if (user) {
+    return <Dashboard />;
+  }
+
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center text-muted font-mono text-xs">
+          Loading...
+        </div>
+      }
+    >
+      <Landing />
+    </Suspense>
+  );
+}
+
 export default function App() {
   return (
     <Routes>
@@ -72,14 +113,7 @@ export default function App() {
           </PublicRoute>
         }
       />
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute>
-            <Dashboard />
-          </ProtectedRoute>
-        }
-      />
+      <Route path="/" element={<HomeRoute />} />
       <Route
         path="/goals"
         element={
@@ -92,4 +126,3 @@ export default function App() {
     </Routes>
   );
 }
-

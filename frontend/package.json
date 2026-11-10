@@ -12,8 +12,11 @@
     "@fontsource/instrument-serif": "^5.0.20",
     "@fontsource/inter": "^5.0.21",
     "@fontsource/jetbrains-mono": "^5.0.21",
+    "@gsap/react": "^2.1.1",
     "@tanstack/react-query": "^5.28.4",
     "framer-motion": "^11.0.8",
+    "gsap": "^3.12.5",
+    "lenis": "^1.1.14",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.22.3"
@@ -26,4 +29,3 @@
     "vite": "^5.1.6"
   }
 }
-
