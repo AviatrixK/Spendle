@@ -176,5 +176,5 @@ From within the `backend/` directory:
 - **Zero Float Rule**: Never use floats for financial math. Store as `int64` paise (e.g., ₹12.50 = `1250` paise).
 - **Explicit Error Handling**: Always return `(result, error)`. Never panic for expected runtime issues.
 - **Educational Comments**: Key Go idioms (`defer`, `goroutines`, `channels`, `context`, `interfaces`) are documented inline for reference.
-- Detailed rules are codified in [`PROJECT_RULES.md`](file:///d:/VsCode/Spendle/PROJECT_RULES.md).
+- Detailed rules are codified in [`PROJECT_RULES.md`](PROJECT_RULES.md).
 

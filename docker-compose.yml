@@ -1,0 +1,25 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: spendle_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: spendle
+      POSTGRES_PASSWORD: spendle
+      POSTGRES_DB: spendle_db
+    ports:
+      # If port 5432 is already used on your machine (e.g. by a local PostgreSQL installation),
+      # change the host port mapping to "5433:5432" (or another available port).
+      # If changed, also update DATABASE_URL in backend/.env to match the new host port (e.g. localhost:5433).
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spendle -d spendle_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+

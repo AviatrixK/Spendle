@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/config"
+	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/db"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/server"
 )
 
@@ -42,14 +43,32 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// 3. Initialize server with configuration and logger
-	srv := server.New(cfg, logger)
+	// 3. Execute versioned SQL migrations using golang-migrate
+	logger.Info("running database migrations...")
+	if err := db.RunMigrations(cfg.DatabaseURL); err != nil {
+		logger.Error("database migration failed", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("database migrations completed successfully")
 
-	// 4. Start the HTTP server inside a background goroutine
+	// 4. Initialize PostgreSQL connection pool with sensible limits and health verification
+	logger.Info("connecting to database pool...")
+	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
+	if err != nil {
+		logger.Error("failed to create database connection pool", "error", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+	logger.Info("database connection pool initialized")
+
+	// 5. Initialize server with configuration, logger, and database connection pool
+	srv := server.New(cfg, logger, pool)
+
+	// 6. Start the HTTP server inside a background goroutine
 	// Go Concept - Goroutines:
-	// A goroutine is a lightweight thread of execution managed by the Go runtime (prefix with `go`).
+	// A goroutine is a lightweight thread managed by the Go runtime (prefixed with `go`).
 	// Because `srv.Start()` is blocking (it loops forever accepting TCP connections), running it
-	// in a goroutine allows the main function to continue and listen for shutdown signals.
+	// in a goroutine allows the main function to proceed and listen for shutdown signals.
 	go func() {
 		if err := srv.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("server encountered fatal error", "error", err)
@@ -57,7 +76,7 @@ func main() {
 		}
 	}()
 
-	// 5. Block the main thread until an OS signal is caught
+	// 7. Block the main thread until an OS signal is caught
 	// Go Concept - Channel Receive (<-):
 	// `ctx.Done()` returns a channel that closes when a signal arrives. Reading from it blocks
 	// the main goroutine without consuming CPU cycles until the event occurs.
@@ -65,7 +84,7 @@ func main() {
 
 	logger.Info("shutdown signal received, initiating graceful shutdown")
 
-	// 6. Create a 10-second timeout context for in-flight requests to complete
+	// 8. Create a 10-second timeout context for in-flight requests to complete
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -74,6 +93,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 9. Close database connection pool during graceful shutdown
+	logger.Info("closing database connection pool...")
+	pool.Close()
+	logger.Info("database connection pool closed")
+
 	logger.Info("server exited cleanly")
 }
-

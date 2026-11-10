@@ -59,7 +59,7 @@ func (c *Config) Addr() string {
 	return fmt.Sprintf(":%d", c.Port)
 }
 
-// validate checks constraints and ensures critical values are present in production.
+// validate checks constraints and ensures critical values are present.
 func (c *Config) validate() error {
 	switch c.Env {
 	case "development", "production", "test":
@@ -68,11 +68,13 @@ func (c *Config) validate() error {
 		return fmt.Errorf("invalid ENV %q: must be 'development', 'production', or 'test'", c.Env)
 	}
 
-	// Fail-fast rule: in production, database and security secrets must never be omitted.
+	// DATABASE_URL is strictly required across all environments from Task 2 onwards
+	if c.DatabaseURL == "" {
+		return fmt.Errorf("DATABASE_URL is required: environment variable is empty or not set")
+	}
+
+	// Fail-fast rule: in production, security secrets must never be omitted.
 	if c.Env == "production" {
-		if c.DatabaseURL == "" {
-			return fmt.Errorf("DATABASE_URL is required when ENV is 'production'")
-		}
 		if c.JWTSecret == "" {
 			return fmt.Errorf("JWT_SECRET is required when ENV is 'production'")
 		}
@@ -98,7 +100,7 @@ func loadDotEnv(filepath string) error {
 	}
 	// Go Concept - Defer:
 	// defer schedules a function call to run right before the enclosing function returns.
-	// It is idiomatic Go for cleanup (closing files, releasing locks, etc.).
+	// This ensures resources (like file handles or database connections) are reliably cleaned up.
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
@@ -108,17 +110,21 @@ func loadDotEnv(filepath string) error {
 			continue // skip empty lines and comments
 		}
 
-		parts := strings.SplitN(line, "=", 2)
-		if len(parts) == 2 {
-			key := strings.TrimSpace(parts[0])
-			val := strings.Trim(strings.TrimSpace(parts[1]), `"'`)
-			// Only set if not already set in the active environment
-			if os.Getenv(key) == "" {
-				_ = os.Setenv(key, val)
-			}
+		key, val, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+
+		key = strings.TrimSpace(key)
+		val = strings.TrimSpace(val)
+		// Strip wrapping quotes if present
+		val = strings.Trim(val, `"'`)
+
+		// Do not overwrite an already existing environment variable
+		if _, exists := os.LookupEnv(key); !exists {
+			_ = os.Setenv(key, val)
 		}
 	}
 
 	return scanner.Err()
 }
-

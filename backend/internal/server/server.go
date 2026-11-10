@@ -6,26 +6,29 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/config"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/httpx"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/middleware"
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Server encapsulates the HTTP server, routing engine, configuration, and structured logger.
+// Server encapsulates the HTTP server, routing engine, database connection pool,
+// configuration, and structured logger.
 // Go Concept - Composition over Inheritance:
 // Go does not have OOP classes or inheritance. Instead, we compose structs by grouping
 // fields together and declaring methods with a pointer receiver `(s *Server)`.
 type Server struct {
 	cfg    *config.Config
 	logger *slog.Logger
+	db     *pgxpool.Pool
 	router *chi.Mux
 	http   *http.Server
 }
 
 // New creates and configures a new Server instance.
 // In Go, the idiom for constructors is a package function named `New(...)` or `NewServer(...)`.
-func New(cfg *config.Config, logger *slog.Logger) *Server {
+func New(cfg *config.Config, logger *slog.Logger, db *pgxpool.Pool) *Server {
 	router := chi.NewRouter()
 
 	// Global Middlewares
@@ -36,6 +39,7 @@ func New(cfg *config.Config, logger *slog.Logger) *Server {
 	s := &Server{
 		cfg:    cfg,
 		logger: logger,
+		db:     db,
 		router: router,
 		http: &http.Server{
 			Addr:         cfg.Addr(),
@@ -61,12 +65,36 @@ func (s *Server) mountRoutes() {
 		})
 	}
 
+	// Health handler verifies connectivity to the PostgreSQL database with a 2-second timeout
+	healthHandler := func(w http.ResponseWriter, r *http.Request) {
+		if s.db == nil {
+			s.logger.Error("database health check failed: pool is nil")
+			_ = httpx.WriteError(w, http.StatusServiceUnavailable, "database unavailable")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+
+		if err := s.db.Ping(ctx); err != nil {
+			s.logger.Error("database health check failed", "error", err)
+			_ = httpx.WriteError(w, http.StatusServiceUnavailable, "database unavailable")
+			return
+		}
+
+		_ = httpx.WriteJSON(w, http.StatusOK, map[string]string{
+			"status":   "ok",
+			"database": "up",
+		})
+	}
+
 	// Root-level health check: GET /ping
 	s.router.Get("/ping", pingHandler)
 
-	// API v1 group: mounts endpoints under /api/v1 (e.g. GET /api/v1/ping)
+	// API v1 group: mounts endpoints under /api/v1
 	s.router.Route("/api/v1", func(r chi.Router) {
 		r.Get("/ping", pingHandler)
+		r.Get("/health", healthHandler)
 	})
 }
 
@@ -92,4 +120,3 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) Router() *chi.Mux {
 	return s.router
 }
-

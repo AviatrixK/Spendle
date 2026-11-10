@@ -20,11 +20,12 @@ func TestPingEndpoints(t *testing.T) {
 	cfg := &config.Config{
 		Port:           8080,
 		Env:            "test",
+		DatabaseURL:    "postgres://spendle:spendle@localhost:5432/spendle_db?sslmode=disable",
 		FrontendOrigin: "http://localhost:5173",
 	}
 	// Discard log output during tests to keep test runs clean
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := server.New(cfg, logger)
+	srv := server.New(cfg, logger, nil)
 
 	endpoints := []string{"/ping", "/api/v1/ping"}
 
@@ -59,3 +60,32 @@ func TestPingEndpoints(t *testing.T) {
 	}
 }
 
+func TestHealthEndpoint_DatabaseUnavailable(t *testing.T) {
+	cfg := &config.Config{
+		Port:           8080,
+		Env:            "test",
+		DatabaseURL:    "postgres://spendle:spendle@localhost:5432/spendle_db?sslmode=disable",
+		FrontendOrigin: "http://localhost:5173",
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	// Pass nil db to simulate database unavailable
+	srv := server.New(cfg, logger, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	rr := httptest.NewRecorder()
+
+	srv.Router().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status code %d, got %d", http.StatusServiceUnavailable, rr.Code)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(rr.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to parse JSON response body: %v", err)
+	}
+
+	if body["error"] != "database unavailable" {
+		t.Errorf("expected error 'database unavailable', got %q", body["error"])
+	}
+}
