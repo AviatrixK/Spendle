@@ -11,6 +11,8 @@ import (
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/auth"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/budget"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/config"
+	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/dashboard"
+	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/goal"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/httpx"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/middleware"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/transaction"
@@ -22,11 +24,12 @@ import (
 // Go does not have OOP classes or inheritance. Instead, we compose structs by grouping
 // fields together and declaring methods with a pointer receiver `(s *Server)`.
 type Server struct {
-	cfg    *config.Config
-	logger *slog.Logger
-	db     *pgxpool.Pool
-	router *chi.Mux
-	http   *http.Server
+	cfg         *config.Config
+	logger      *slog.Logger
+	db          *pgxpool.Pool
+	router      *chi.Mux
+	http        *http.Server
+	goalService *goal.Service
 }
 
 // New creates and configures a new Server instance.
@@ -110,6 +113,18 @@ func (s *Server) mountRoutes() {
 	txService := transaction.NewService(txRepo, budgetRepo)
 	txHandler := transaction.NewHandler(txService)
 
+	// Dependency Injection: Initialize Goal components
+	goalRepo := goal.NewPGRepository(s.db)
+	s.goalService = goal.NewService(goalRepo)
+	goalHandler := goal.NewHandler(s.goalService)
+
+	// Dependency Injection: Initialize Dashboard components using consumer-defined adapters
+	budgetAdapter := dashboard.NewBudgetServiceAdapter(budgetService)
+	txAdapter := dashboard.NewTransactionServiceAdapter(txService)
+	goalAdapter := dashboard.NewGoalServiceAdapter(s.goalService)
+	dashboardService := dashboard.NewService(budgetAdapter, txAdapter, goalAdapter)
+	dashboardHandler := dashboard.NewHandler(dashboardService)
+
 	// API v1 group: mounts endpoints under /api/v1
 	s.router.Route("/api/v1", func(r chi.Router) {
 		// Public health endpoints
@@ -129,7 +144,7 @@ func (s *Server) mountRoutes() {
 			})
 		})
 
-		// Protected domain routes: Categories, Budgets, Transactions
+		// Protected domain routes: Categories, Budgets, Transactions, Goals, Dashboard
 		r.Group(func(r chi.Router) {
 			r.Use(auth.RequireAuth(tokenMgr))
 
@@ -147,8 +162,25 @@ func (s *Server) mountRoutes() {
 			r.Get("/transactions", txHandler.List)
 			r.Delete("/transactions/{id}", txHandler.Delete)
 			r.Get("/transactions/summary", txHandler.GetSummary)
+
+			// Goal endpoints
+			r.Post("/goals", goalHandler.Create)
+			r.Get("/goals", goalHandler.List)
+			r.Put("/goals/{id}", goalHandler.Update)
+			r.Delete("/goals/{id}", goalHandler.Delete)
+
+			// Month Close endpoint
+			r.Post("/months/close", goalHandler.CloseMonth)
+
+			// Dashboard endpoint
+			r.Get("/dashboard", dashboardHandler.GetDashboard)
 		})
 	})
+}
+
+// GoalService returns the configured goal Service instance for the background worker.
+func (s *Server) GoalService() *goal.Service {
+	return s.goalService
 }
 
 // Start begins listening and serving incoming HTTP requests.

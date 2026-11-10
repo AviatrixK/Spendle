@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Go Concept - Structs:
@@ -17,6 +18,7 @@ type Config struct {
 	DatabaseURL    string
 	JWTSecret      string
 	FrontendOrigin string
+	WorkerInterval time.Duration
 }
 
 // Go Concept - Pointers (*Config) and Multiple Return Values:
@@ -39,12 +41,19 @@ func Load() (*Config, error) {
 	jwtSecret := getEnv("JWT_SECRET", "")
 	frontendOrigin := getEnv("FRONTEND_ORIGIN", "http://localhost:5173")
 
+	workerIntervalStr := getEnv("WORKER_INTERVAL", "1h")
+	workerInterval, err := time.ParseDuration(workerIntervalStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid WORKER_INTERVAL value %q: %w", workerIntervalStr, err)
+	}
+
 	cfg := &Config{
 		Port:           port,
 		Env:            env,
 		DatabaseURL:    dbURL,
 		JWTSecret:      jwtSecret,
 		FrontendOrigin: frontendOrigin,
+		WorkerInterval: workerInterval,
 	}
 
 	if err := cfg.validate(); err != nil {

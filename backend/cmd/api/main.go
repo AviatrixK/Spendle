@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/config"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/db"
+	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/goal"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/server"
 )
 
@@ -64,7 +66,15 @@ func main() {
 	// 5. Initialize server with configuration, logger, and database connection pool
 	srv := server.New(cfg, logger, pool)
 
-	// 6. Start the HTTP server inside a background goroutine
+	// 6. Start background month-end rollover worker goroutines
+	// Go Concept - Background Goroutines with sync.WaitGroup:
+	// StartWorker runs background tasks concurrently with the HTTP server.
+	// We pass a pointer to workerWG so the main goroutine can wait for workers
+	// to drain before closing the database connection pool.
+	var workerWG sync.WaitGroup
+	goal.StartWorker(ctx, srv.GoalService(), cfg.WorkerInterval, &workerWG)
+
+	// 7. Start the HTTP server inside a background goroutine
 	// Go Concept - Goroutines:
 	// A goroutine is a lightweight thread managed by the Go runtime (prefixed with `go`).
 	// Because `srv.Start()` is blocking (it loops forever accepting TCP connections), running it
@@ -76,7 +86,7 @@ func main() {
 		}
 	}()
 
-	// 7. Block the main thread until an OS signal is caught
+	// 8. Block the main thread until an OS signal is caught
 	// Go Concept - Channel Receive (<-):
 	// `ctx.Done()` returns a channel that closes when a signal arrives. Reading from it blocks
 	// the main goroutine without consuming CPU cycles until the event occurs.
@@ -84,7 +94,7 @@ func main() {
 
 	logger.Info("shutdown signal received, initiating graceful shutdown")
 
-	// 8. Create a 10-second timeout context for in-flight requests to complete
+	// 9. Create a 10-second timeout context for in-flight requests to complete
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -93,7 +103,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 9. Close database connection pool during graceful shutdown
+	// Wait for all background worker goroutines to finish active jobs cleanly
+	logger.Info("waiting for background workers to exit...")
+	workerWG.Wait()
+	logger.Info("background workers exited cleanly")
+
+	// 10. Close database connection pool during graceful shutdown
 	logger.Info("closing database connection pool...")
 	pool.Close()
 	logger.Info("database connection pool closed")
