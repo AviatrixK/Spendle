@@ -49,5 +49,7 @@ tx2.json
 tx3.json
 bad_tx.json
 *.test.json
+demo_*.json
+test_*.json
 
 

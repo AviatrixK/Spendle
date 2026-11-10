@@ -1,180 +1,284 @@
-# Spendle 💰
+# Spendle
 
-> **Smart, disciplined personal budgeting and automated savings tracker.**  
-> Built as a capstone project for the **New Age Programming Languages Lab** course, featuring **Go** as the primary backend language.
+> Personal Budget, Expense Tracking & Automated Savings Rollover Engine
 
----
-
-## 📌 Project Overview
-
-**Spendle** helps individuals take control of their personal finances through structured monthly budgeting, instant transaction logging, and automated savings sweeps. Designed with strict financial accuracy and modern software architecture principles in mind.
-
-### Key Capabilities
-- **Category-Based Monthly Budgets**: Set dynamic spending targets for default and custom categories.
-- **One-Tap Transaction Logging**: Quickly log income and expenses across three primary payment modes: **UPI**, **Cash**, and **Card**.
-- **Visual Dashboard**: Real-time "spent vs. left" tracking per category, alongside overall monthly profit and loss summaries.
-- **Ranked Savings Goals**: Set and prioritize personal savings targets (e.g., Emergency Fund #1, Tech Upgrade #2).
-- **Automated Month-End Rollover**: Any unspent budget at the end of the month automatically sweeps into savings goals according to their priority rank.
-- **Strict Monetary Precision (Zero Floats)**: All monetary figures are calculated and persisted strictly as **integer paise** (`int64` in Go, `BIGINT` in PostgreSQL). No floating-point rounding errors. Currency is INR (₹) exclusively.
-
----
-
-## 🏛️ System Architecture
-
-Spendle follows a strict **Layered Architecture** with unidirectional dependency flow:
+Spendle is an opinionated, privacy-conscious personal finance web application built for college capstone evaluation (New Age Programming Languages Lab). It helps individuals maintain financial discipline through monthly category budgeting, rapid one-tap expense and income logging, and automated month-end rollover sweeps. Unspent budget from previous months is dynamically reallocated into prioritized savings goals via an asynchronous Go background worker, ensuring discipline without manual arithmetic.
 
 ```
-[ Client / Frontend ]
-          │ (HTTP / JSON)
-          ▼
-   [ HTTP Handler ]      --> Parses requests, validates inputs, calls service layer
-          │
-          ▼
-   [ Service Layer ]     --> Contains core business logic, depends on repository interfaces
-          │
-          ▼
- [ Repository Layer ]    --> Executes plain SQL queries against PostgreSQL using pgx
-          │
-          ▼
-    [ PostgreSQL ]       --> Relational data store (amounts stored as BIGINT paise)
+[ Screenshot: Spendle Dashboard & Quick-Add Sheet (Dark Glass Theme with Molten Gold Accent) ]
 ```
-
-### Architectural Guiding Principles
-1. **Interface-Driven Dependency Injection**: Services depend solely on repository *interfaces*, allowing business logic to be unit tested in isolation without a live database.
-2. **Standard Library First**: Built with Go's robust standard packages (`net/http`, `log/slog`, `context`, `encoding/json`), minimizing external dependencies.
-3. **No ORM**: Plain, explicit SQL via `pgx/v5` for predictable database performance and full query visibility.
-4. **Graceful Lifecycle Management**: Clean server startup and graceful termination handling OS interrupts (`SIGINT`, `SIGTERM`) with context deadlines.
 
 ---
 
-## 🛠️ Technology Stack
+## 1. Features
 
-| Layer | Technology | Details |
+- **JWT Cookie Authentication**: Secure, constant-time bcrypt authentication using strict `httpOnly`, `SameSite=Lax` session cookies with zero client-side token storage in `localStorage`.
+- **Category Budgeting**: Monthly spending limits configured per category, featuring real-time "spent vs. left" tracking with visual progress indicators.
+- **One-Tap Quick Logging**: Mobile-first floating action buttons triggering an animated bottom sheet for instant expense/income logging across UPI, Cash, and Card.
+- **Prioritized Savings Goals**: Savings targets with priority ranks, dynamic progress percentage, deadline monthly requirement, or estimated time of arrival (ETA).
+- **Automated Month-End Sweep**: Background worker goroutine pool that periodically detects unclosed past months and sweeps unspent budget into active savings goals based on priority rank.
+- **Idempotent Month Closing**: Atomic PostgreSQL transactions using `ON CONFLICT DO NOTHING` ensuring months cannot be swept twice or duplicate funds transferred.
+- **Concurrent Dashboard Aggregator**: Loads monthly summary, category budget progress, and savings goals simultaneously using Go's `errgroup` with a 3-second context timeout.
+- **Indian Monetary Standard (INR ₹)**: All financial values are strictly represented and calculated in 64-bit integer paise (`int64`, 1 Rupee = 100 Paise) to avoid floating-point inaccuracies.
+
+---
+
+## 2. Tech Stack
+
+| Layer | Technology | Why Chosen |
 | :--- | :--- | :--- |
-| **Backend Language** | **Go 1.22+** | Idiomatic, strongly-typed, concurrent backend |
-| **HTTP Router** | **Chi v5** (`github.com/go-chi/chi/v5`) | Lightweight, idiomatic standard `net/http` compatible routing |
-| **Database Driver** | **pgx v5** (`github.com/jackc/pgx/v5`) | High-performance PostgreSQL driver (Plain SQL, NO ORM) |
-| **Migrations** | **golang-migrate** | Reproducible, versioned database schema migrations |
-| **Logging** | **log/slog** | Go standard library structured logging (JSON in prod, text in dev) |
-| **Frontend** *(Upcoming)* | **React + Vite** | Fast, responsive modern web client |
-| **Styling & UI** *(Upcoming)* | **Tailwind CSS + Framer Motion** | Utility-first styling with smooth interactive animations |
-| **Charts** *(Upcoming)* | **Chart.js** | Visual spending analytics and progress meters |
+| **Backend Language** | Go 1.22+ | Native concurrency (goroutines/channels), strong typing, fast execution, zero heavy runtime. |
+| **HTTP Router** | Chi (`go-chi/chi/v5`) | Idiomatic, 100% compatible with `net/http`, lightweight composable middleware chain. |
+| **Database & Driver** | PostgreSQL 16 + `pgx/v5` | Robust ACID compliance, connection pooling (`pgxpool`), plain SQL without heavy ORM overhead. |
+| **Migrations** | `golang-migrate/v4` | Version-controlled, idempotent schema management embedded into the binary via `embed.FS`. |
+| **Frontend Framework** | React 18 + Vite | Fast HMR dev-server with built-in proxying, simple JSX without TypeScript build overhead. |
+| **Client State / Cache**| TanStack Query v5 | Server-state caching, automatic cache invalidation, and declarative query loading states. |
+| **Styling** | Tailwind CSS 3.4 | Utility-first styling with custom tokens (soft dark glass `#0E0E11`, molten gold `#F5B83D`). |
+| **Animations** | Framer Motion | Fluid spring physics for the quick-add bottom sheet and modal dialogues (~250ms). |
 
 ---
 
-## 📂 Repository Structure
+## 3. Architecture
+
+### System Architecture
+
+```mermaid
+graph TD
+    Client["Browser (React + Vite SPA)"]
+    ViteProxy["Vite Dev Proxy (:5173/api)"]
+    Server["Go HTTP Server (:8080)"]
+
+    subgraph GoBackend["Spendle Go Backend"]
+        Mux["Chi Router (/api/v1)"]
+        AuthMid["auth.RequireAuth Middleware"]
+        Handlers["HTTP Handlers (auth, budget, tx, goal, dashboard)"]
+        Services["Domain Services"]
+        Repos["Repository Interfaces"]
+        PG["PostgreSQL PGRepository (pgxpool)"]
+        Worker["Background Rollover Worker (Producer + 3 Workers)"]
+    end
+
+    DB[("PostgreSQL 16 Database")]
+
+    Client -->|HTTP + httpOnly Cookie| ViteProxy
+    ViteProxy -->|Proxy /api| Server
+    Server --> Mux
+    Mux --> AuthMid
+    AuthMid --> Handlers
+    Handlers --> Services
+    Services --> Repos
+    Repos --> PG
+    PG -->|Plain SQL Queries| DB
+    Worker -->|Ticker Scan & CloseMonth Tx| Services
+```
+
+### Sequence: Quick-Add Expense -> Dashboard Update
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant UI as QuickAddSheet (React)
+    participant API as Chi API Router
+    participant Svc as Transaction Service
+    participant Repo as Transaction Repository
+    participant DB as PostgreSQL
+    participant Query as TanStack Query Client
+
+    User->>UI: Types ₹250, taps "Food" chip & "Save"
+    UI->>API: POST /api/v1/transactions (amount_paise: 25000, category_id, upi)
+    API->>Svc: Create(ctx, userID, input)
+    Svc->>Svc: Validate positive amount & category ownership
+    Svc->>Repo: CreateTransaction(ctx, tx)
+    Repo->>DB: INSERT INTO transactions ... RETURNING id
+    DB-->>Repo: Saved row
+    Repo-->>Svc: Transaction struct
+    Svc-->>API: Transaction entity
+    API-->>UI: 201 Created (JSON)
+    UI->>Query: invalidateQueries(['dashboard'], ['transactions'])
+    Query->>API: GET /api/v1/dashboard?month=2026-10
+    API-->>Query: 200 OK (updated spent, left, net balance)
+    Query-->>User: UI updates budget bar to coral & banner to In loss
+```
+
+---
+
+## 4. Go Language Features Showcase
+
+The codebase is specifically designed for college capstone examination to demonstrate core Go language idioms:
+
+| Go Concept | File & Location | Purpose & Implementation |
+| :--- | :--- | :--- |
+| **Goroutines & Channels** | [`backend/internal/goal/worker.go`](file:///d:/VsCode/Spendle/backend/internal/goal/worker.go) | Producer enqueues unclosed month jobs into a buffered channel; 3 worker goroutines process rollovers concurrently. |
+| **`time.Ticker`** | [`backend/internal/goal/worker.go`](file:///d:/VsCode/Spendle/backend/internal/goal/worker.go) | Triggers periodic background sweeps at configured interval (`WORKER_INTERVAL`). |
+| **`sync.WaitGroup`** | [`backend/cmd/api/main.go`](file:///d:/VsCode/Spendle/backend/cmd/api/main.go) | Tracks worker goroutines to ensure all in-flight jobs finish cleanly during shutdown. |
+| **Context Cancellation** | [`backend/cmd/api/main.go`](file:///d:/VsCode/Spendle/backend/cmd/api/main.go) | `signal.NotifyContext` intercepts `SIGINT`/`SIGTERM`, propagating cancellation to workers and HTTP server. |
+| **`errgroup.WithContext`** | [`backend/internal/dashboard/service.go`](file:///d:/VsCode/Spendle/backend/internal/dashboard/service.go) | Loads summary, budgets, and goals concurrently; aborts siblings on first error. |
+| **Consumer Interfaces** | [`backend/internal/dashboard/service.go`](file:///d:/VsCode/Spendle/backend/internal/dashboard/service.go) | Dashboard defines `BudgetsReader`, `SummaryReader`, `GoalsReader` contracts, decoupling from concrete services. |
+| **Database Transactions (ACID)** | [`backend/internal/goal/repository_pg.go`](file:///d:/VsCode/Spendle/backend/internal/goal/repository_pg.go) | `tx.Begin(ctx)` wraps closing insertion, leftover calculation, goal balance update, and contributions. |
+| **Table-Driven Unit Tests** | [`backend/internal/goal/calc_test.go`](file:///d:/VsCode/Spendle/backend/internal/goal/calc_test.go) | Idiomatic slice of test cases verifying progress percentage capping and deadline arithmetic without DB. |
+| **Sentinel Errors & `errors.Is`** | [`backend/internal/goal/errors.go`](file:///d:/VsCode/Spendle/backend/internal/goal/errors.go) | Package-level error values inspected with `errors.Is` in handlers to map clean HTTP status codes. |
+
+---
+
+## 5. Getting Started (Windows PowerShell)
+
+### Prerequisites
+- **Go 1.22+**: [golang.org/dl](https://golang.org/dl/)
+- **Node.js 18+ & npm**: [nodejs.org](https://nodejs.org/)
+- **Docker Desktop**: [docker.com](https://www.docker.com/) (for PostgreSQL)
+
+---
+
+### Step 1: Start PostgreSQL via Docker
+Run in PowerShell:
+```powershell
+docker run -d --name spendle-postgres `
+  -e POSTGRES_USER=spendle `
+  -e POSTGRES_PASSWORD=spendle `
+  -e POSTGRES_DB=spendle_db `
+  -p 5432:5432 `
+  postgres:16-alpine
+```
+
+---
+
+### Step 2: Configure Environment
+Copy the example environment file inside `backend/`:
+```powershell
+cd d:\VsCode\Spendle\backend
+Copy-Item .env.example .env
+```
+
+---
+
+### Step 3: Seed Demo Data
+Populate the database with realistic relative demo data for the presentation:
+```powershell
+cd d:\VsCode\Spendle\backend
+go run ./cmd/seed
+```
+*Output will display the demo account credentials:*
+- **Email:** `demo@spendle.app`
+- **Password:** `demo12345`
+
+---
+
+### Step 4: Run Go Backend API Server
+In PowerShell Terminal 1:
+```powershell
+cd d:\VsCode\Spendle\backend
+go run ./cmd/api
+```
+*(Server listens on `http://localhost:8080`, automatically runs database migrations, and starts the background worker pool)*
+
+---
+
+### Step 5: Run React Frontend
+In PowerShell Terminal 2:
+```powershell
+cd d:\VsCode\Spendle\frontend
+npm install
+npm run dev
+```
+*(Vite runs on `http://localhost:5173` and proxies `/api` requests to port `8080`)*
+
+---
+
+### Step 6: Log In & Demo
+1. Open your browser at `http://localhost:5173`.
+2. Sign in with `demo@spendle.app` / `demo12345`.
+3. Follow [`docs/DEMO.md`](file:///d:/VsCode/Spendle/docs/DEMO.md) for the live evaluation walkthrough.
+
+---
+
+## 6. Project Structure
 
 ```
 Spendle/
-├── .gitignore               # Root git ignore (Go binaries, .env, node_modules)
-├── PROJECT_RULES.md         # Hard project rules, domain guidelines & architectural constraints
-├── README.md                # Project-wide documentation
-│
-├── backend/                 # Go backend service
+├── backend/                   # Go REST API backend
 │   ├── cmd/
-│   │   └── api/
-│   │       └── main.go      # Entrypoint & graceful shutdown orchestration
+│   │   ├── api/               # Main entrypoint (server + background worker)
+│   │   └── seed/              # Database demo data seeder
 │   ├── internal/
-│   │   ├── auth/            # Authentication, JWT, and session security
-│   │   ├── budget/          # Category budgets & paise allocations
-│   │   ├── config/          # Environment variable loading & validation
-│   │   ├── dashboard/       # Aggregated financial analytics & metrics
-│   │   ├── goal/            # Savings goals & priority sweep engine
-│   │   ├── httpx/           # Reusable HTTP JSON helpers & error envelopes
-│   │   ├── middleware/      # Slog logger, panic recovery, CORS middleware
-│   │   ├── server/          # Chi router setup, routes & httptest suites
-│   │   └── transaction/     # Income/expense transactions (UPI, Cash, Card)
-│   ├── .env.example         # Template configuration for local environments
-│   ├── Makefile             # Development automation (run, build, test, tidy)
-│   └── README.md            # Backend-specific documentation & setup guide
-│
-└── Frontend/                # React client application (Upcoming)
+│   │   ├── auth/              # JWT cookie auth, bcrypt hashing, middleware
+│   │   ├── budget/            # Category management & monthly budget limits
+│   │   ├── config/            # Environment variable parsing (.env support)
+│   │   ├── dashboard/         # Concurrent dashboard aggregator (errgroup)
+│   │   ├── db/                # pgxpool connection pool & embedded SQL migrations
+│   │   ├── goal/              # Savings goals, rollover sweep, background worker
+│   │   ├── httpx/             # JSON response/error encoding helpers
+│   │   ├── middleware/        # CORS, structured logger, panic recovery
+│   │   └── transaction/       # One-tap expense & income recording
+│   ├── go.mod                 # Go module definition
+│   └── .env.example           # Backend environment configuration template
+├── docs/                      # Capstone evaluation documentation
+│   ├── DEMO.md                # 6-8 minute Phase II live demo presentation script
+│   └── VIVA_NOTES.md          # Comprehensive viva study notes & examiner Q&A
+├── frontend/                  # React 18 + Vite frontend
+│   ├── src/
+│   │   ├── components/        # GlassCard, ProgressBar, Fab, QuickAddSheet, Modals
+│   │   ├── lib/               # Indian Rupee (INR) and calendar date formatters
+│   │   ├── pages/             # Login, Dashboard, Goals views
+│   │   ├── api.js             # Fetch wrapper with credentials: 'include'
+│   │   ├── App.jsx            # Route definitions & auth session guard
+│   │   └── main.jsx           # QueryClientProvider & React DOM mount
+│   ├── package.json           # Dependencies (Tailwind, Framer Motion, TanStack Query)
+│   └── vite.config.js         # Dev-server proxy configuration
+└── README.md                  # Project overview, setup, and viva guide
 ```
 
 ---
 
-## 🚀 Quickstart Guide
+## 7. API Summary
 
-### 1. Prerequisites
-- **Go**: 1.22 or higher ([Download Go](https://go.dev/dl/))
-- **Git**
-- **PostgreSQL**: 15+ (for subsequent database tasks)
+All endpoints (except health and auth login/signup) are protected by `auth.RequireAuth` checking the `spendle_token` cookie:
 
-### 2. Setup the Backend
-Navigate to the `backend/` directory:
-```bash
-cd backend
-```
-
-Copy the example environment file:
-```bash
-cp .env.example .env
-```
-
-Verify or update the configuration in `.env`:
-```env
-PORT=8080
-ENV=development
-FRONTEND_ORIGIN=http://localhost:5173
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/spendle?sslmode=disable
-JWT_SECRET=super-secret-development-key-change-in-production
-```
-
-### 3. Run the Backend Server
-```bash
-go run ./cmd/api
-```
-*(Or use `make run`)*
-
-You should see structured log output confirming server startup:
-```
-time=... level=INFO msg="starting spendle api server" addr=:8080 env=development
-```
-
-### 4. Verify API Endpoints
-Open a new terminal window and run:
-
-```bash
-# Test root health check
-curl -i http://localhost:8080/ping
-
-# Test versioned health check
-curl -i http://localhost:8080/api/v1/ping
-```
-
-Expected JSON response:
-```json
-{
-  "app": "spendle",
-  "status": "ok"
-}
-```
-
-### 5. Run Unit Tests
-```bash
-go test -v ./...
-```
-*(Or use `make test`)*
+| Method | Endpoint | Auth | Purpose |
+| :--- | :--- | :---: | :--- |
+| `GET` | `/ping`, `/api/v1/health` | No | Public health check and database ping verification |
+| `POST` | `/api/v1/auth/signup` | No | Register new account and issue secure session cookie |
+| `POST` | `/api/v1/auth/login` | No | Authenticate credentials and issue session cookie |
+| `POST` | `/api/v1/auth/logout` | No | Clear session cookie (`MaxAge: -1`) |
+| `GET` | `/api/v1/auth/me` | Yes | Get authenticated user profile |
+| `GET` | `/api/v1/categories` | Yes | List custom and default categories |
+| `POST` | `/api/v1/categories` | Yes | Create a new custom category |
+| `DELETE`| `/api/v1/categories/{id}` | Yes | Delete category (cascades or sets null) |
+| `GET` | `/api/v1/budgets?month=YYYY-MM` | Yes | Retrieve monthly limits and spent/left progress |
+| `PUT` | `/api/v1/budgets` | Yes | Set or update monthly budget for a category |
+| `GET` | `/api/v1/transactions?month=YYYY-MM&limit=10`| Yes | List transactions for month (newest first) |
+| `POST` | `/api/v1/transactions` | Yes | Record expense (requires category) or income |
+| `DELETE`| `/api/v1/transactions/{id}` | Yes | Remove transaction record |
+| `GET` | `/api/v1/dashboard?month=YYYY-MM` | Yes | Aggregate monthly summary, budgets, and goals concurrently |
+| `GET` | `/api/v1/goals` | Yes | List user savings goals sorted by priority rank |
+| `POST` | `/api/v1/goals` | Yes | Create savings goal (by deadline OR monthly amount) |
+| `PUT` | `/api/v1/goals/{id}` | Yes | Edit goal details, priority, or status |
+| `DELETE`| `/api/v1/goals/{id}` | Yes | Delete savings goal |
+| `POST` | `/api/v1/months/close` | Yes | Manually trigger idempotent month-end budget sweep |
 
 ---
 
-## ⚙️ Development Commands (Makefile)
+## 8. Scope & Phase Boundaries
 
-From within the `backend/` directory:
+### Included in Phase II (Current Implementation)
+- Complete Go backend with Chi, pgx, SQL migrations, and strict user-scoped queries.
+- Clean React + Vite SPA with soft editorial dark glass aesthetics and molten gold accent.
+- Full authentication lifecycle with secure `httpOnly` JWT cookies.
+- Concurrent aggregator using `errgroup` and background rollover worker pool.
+- Full Indian Rupee monetary handling in integer paise (`int64`).
 
-| Command | Action |
-| :--- | :--- |
-| `make run` | Starts the HTTP API server in development mode |
-| `make build` | Compiles the production binary into `backend/bin/api` |
-| `make test` | Executes all package unit tests with verbose output |
-| `make tidy` | Resolves, downloads, and cleans up `go.mod` and `go.sum` |
+### Out of Scope (Planned for Phase III / Future Work)
+- Cloud production deployment (AWS/GCP/Railway) and production SSL certificates.
+- Recurring automated subscription detection and bill reminders.
+- Split expense tracking among multiple users.
+- Complex charting libraries (Chart.js / D3.js).
+- Password reset emails via SMTP and OAuth2 third-party sign-in.
 
 ---
 
-## 📜 Coding Conventions & Guidelines
+## 9. Academic AI Assistance Statement
 
-- **Zero Float Rule**: Never use floats for financial math. Store as `int64` paise (e.g., ₹12.50 = `1250` paise).
-- **Explicit Error Handling**: Always return `(result, error)`. Never panic for expected runtime issues.
-- **Educational Comments**: Key Go idioms (`defer`, `goroutines`, `channels`, `context`, `interfaces`) are documented inline for reference.
-- Detailed rules are codified in [`PROJECT_RULES.md`](PROJECT_RULES.md).
-
+In accordance with academic integrity guidelines for this course:
+- **Google Antigravity** was utilized as an agentic AI coding assistant for code scaffolding, repetitive boilerplate implementation, and documentation formatting.
+- **Claude** was used for high-level architectural brainstorming and query design.
+- All generated code, database schemas, concurrency primitives, and architectural decisions were manually reviewed, tested, and validated by the author for adherence to project constraints and Go idiomatic practices.
