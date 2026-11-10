@@ -53,18 +53,35 @@ func main() {
 	}
 
 	// 4. Idempotent cleanup: Delete existing demo user and cascaded data
+	// 4. Idempotent cleanup: Delete existing demo user and cascaded data
 	logger.Info("cleaning up existing demo user (if present)...")
-	cleanupQuery := `
-		DELETE FROM goal_contributions WHERE user_id IN (SELECT id FROM users WHERE email = $1);
-		DELETE FROM goals WHERE user_id IN (SELECT id FROM users WHERE email = $1);
-		DELETE FROM month_closings WHERE user_id IN (SELECT id FROM users WHERE email = $1);
-		DELETE FROM transactions WHERE user_id IN (SELECT id FROM users WHERE email = $1);
-		DELETE FROM monthly_budgets WHERE user_id IN (SELECT id FROM users WHERE email = $1);
-		DELETE FROM categories WHERE user_id IN (SELECT id FROM users WHERE email = $1);
-		DELETE FROM users WHERE email = $1;
-	`
-	if _, err := pool.Exec(ctx, cleanupQuery, demoEmail); err != nil {
-		logger.Error("failed to clean up demo user", "error", err)
+
+	cleanupTx, err := pool.Begin(ctx)
+	if err != nil {
+		logger.Error("failed to begin cleanup transaction", "error", err)
+		os.Exit(1)
+	}
+
+	cleanupQueries := []string{
+		`DELETE FROM goal_contributions WHERE user_id IN (SELECT id FROM users WHERE email = $1)`,
+		`DELETE FROM goals WHERE user_id IN (SELECT id FROM users WHERE email = $1)`,
+		`DELETE FROM month_closings WHERE user_id IN (SELECT id FROM users WHERE email = $1)`,
+		`DELETE FROM transactions WHERE user_id IN (SELECT id FROM users WHERE email = $1)`,
+		`DELETE FROM monthly_budgets WHERE user_id IN (SELECT id FROM users WHERE email = $1)`,
+		`DELETE FROM categories WHERE user_id IN (SELECT id FROM users WHERE email = $1)`,
+		`DELETE FROM users WHERE email = $1`,
+	}
+
+	for _, query := range cleanupQueries {
+		if _, err := cleanupTx.Exec(ctx, query, demoEmail); err != nil {
+			_ = cleanupTx.Rollback(ctx)
+			logger.Error("failed to clean up demo user", "error", err)
+			os.Exit(1)
+		}
+	}
+
+	if err := cleanupTx.Commit(ctx); err != nil {
+		logger.Error("failed to commit cleanup transaction", "error", err)
 		os.Exit(1)
 	}
 
@@ -332,4 +349,3 @@ func main() {
 	fmt.Println("==================================================================")
 	fmt.Println()
 }
-

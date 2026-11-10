@@ -38,6 +38,9 @@ Thumbs.db
 *.log
 tmp/
 
+# Project instructions
+PROJECT_RULES.md
+
 # Test fixtures & session cookies
 cookies.txt
 signup.json
