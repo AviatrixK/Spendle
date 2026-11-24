@@ -38,8 +38,9 @@ Thumbs.db
 *.log
 tmp/
 
-# Project instructions
+# Project instructions & scripts
 PROJECT_RULES.md
+start-spendle.ps1
 
 # Test fixtures & session cookies
 cookies.txt

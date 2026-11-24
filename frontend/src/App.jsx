@@ -5,6 +5,8 @@ import { authApi } from './api';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Goals from './pages/Goals';
+import AmbientBackground from './components/AmbientBackground';
+import CustomCursor from './components/CustomCursor';
 
 // Lazy-load landing page so app bundle stays small
 const Landing = lazy(() => import('./landing/Landing'));
@@ -104,25 +106,33 @@ function HomeRoute() {
 
 export default function App() {
   return (
-    <Routes>
-      <Route
-        path="/login"
-        element={
-          <PublicRoute>
-            <Login />
-          </PublicRoute>
-        }
-      />
-      <Route path="/" element={<HomeRoute />} />
-      <Route
-        path="/goals"
-        element={
-          <ProtectedRoute>
-            <Goals />
-          </ProtectedRoute>
-        }
-      />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <div className="relative min-h-screen bg-bg text-main selection:bg-accent selection:text-bg">
+      {/* 1. Global Ambient Background: Dot-Grid Canvas & 500px Radial Spotlight at -z-10 */}
+      <AmbientBackground intensity="soft" />
+
+      {/* 2. Global Custom Cursor: Gold Dot & Lagging Ring at z-[9999] */}
+      <CustomCursor />
+
+      <Routes>
+        <Route
+          path="/login"
+          element={
+            <PublicRoute>
+              <Login />
+            </PublicRoute>
+          }
+        />
+        <Route path="/" element={<HomeRoute />} />
+        <Route
+          path="/goals"
+          element={
+            <ProtectedRoute>
+              <Goals />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </div>
   );
 }

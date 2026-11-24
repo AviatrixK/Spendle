@@ -13,7 +13,6 @@ import ProfitLoss from './ProfitLoss';
 import IndiaStrip from './IndiaStrip';
 import CtaFooter from './CtaFooter';
 import FilmGrain from './FilmGrain';
-import CursorFollower from './CursorFollower';
 import TravellingDot from './TravellingDot';
 
 gsap.registerPlugin(ScrollTrigger);
@@ -64,15 +63,12 @@ export default function Landing() {
   }, []);
 
   return (
-    <div className="relative min-h-screen bg-[#0E0E11] text-[#EDEAE3] font-sans antialiased overflow-x-hidden selection:bg-accent selection:text-[#0E0E11]">
+    <div className="relative min-h-screen text-main font-sans antialiased overflow-x-hidden">
       {/* Subtle tactile film grain overlay */}
       <FilmGrain />
 
       {/* Persistent hero travelling gold dot */}
       <TravellingDot />
-
-      {/* Desktop-only lagging cursor follower & magnetic button interactions */}
-      <CursorFollower />
 
       {/* Navigation */}
       <Nav />
@@ -93,4 +89,3 @@ export default function Landing() {
     </div>
   );
 }
-
