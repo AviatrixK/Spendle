@@ -13,12 +13,22 @@ import (
 // A struct is a typed collection of fields, similar to an interface or class shape in TypeScript.
 // Fields starting with a capital letter are "exported" (public to other packages).
 type Config struct {
-	Port           int
-	Env            string
-	DatabaseURL    string
-	JWTSecret      string
-	FrontendOrigin string
-	WorkerInterval time.Duration
+	Port               int
+	Env                string
+	DatabaseURL        string
+	JWTSecret          string
+	FrontendOrigin     string
+	WorkerInterval     time.Duration
+	BrevoAPIKey        string
+	BrevoSenderEmail   string
+	BrevoSenderName    string
+	GoogleClientID     string
+	GoogleClientSecret string
+	GoogleRedirectURL  string
+	OTPExpiry          time.Duration
+	OTPCooldown        time.Duration
+	OTPMaxAttempts     int
+	OTPLength          int
 }
 
 // Go Concept - Pointers (*Config) and Multiple Return Values:
@@ -47,13 +57,55 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid WORKER_INTERVAL value %q: %w", workerIntervalStr, err)
 	}
 
+	brevoKey := getEnv("BREVO_API_KEY", "")
+	brevoEmail := getEnv("BREVO_SENDER_EMAIL", "happyquinn4444@gmail.com")
+	brevoName := getEnv("BREVO_SENDER_NAME", "Spendle")
+
+	googleClientID := getEnv("GOOGLE_CLIENT_ID", "")
+	googleClientSecret := getEnv("GOOGLE_CLIENT_SECRET", "")
+	googleRedirectURL := getEnv("GOOGLE_REDIRECT_URL", "http://localhost:8080/api/v1/auth/google/callback")
+
+	otpExpiryMinutesStr := getEnv("OTP_EXPIRY_MINUTES", "2")
+	otpExpiryMinutes, _ := strconv.Atoi(otpExpiryMinutesStr)
+	if otpExpiryMinutes <= 0 {
+		otpExpiryMinutes = 2
+	}
+
+	otpCooldownSecondsStr := getEnv("OTP_COOLDOWN_SECONDS", "60")
+	otpCooldownSeconds, _ := strconv.Atoi(otpCooldownSecondsStr)
+	if otpCooldownSeconds <= 0 {
+		otpCooldownSeconds = 60
+	}
+
+	otpMaxAttemptsStr := getEnv("OTP_MAX_ATTEMPTS", "3")
+	otpMaxAttempts, _ := strconv.Atoi(otpMaxAttemptsStr)
+	if otpMaxAttempts <= 0 {
+		otpMaxAttempts = 3
+	}
+
+	otpLengthStr := getEnv("OTP_LENGTH", "4")
+	otpLength, _ := strconv.Atoi(otpLengthStr)
+	if otpLength <= 0 {
+		otpLength = 4
+	}
+
 	cfg := &Config{
-		Port:           port,
-		Env:            env,
-		DatabaseURL:    dbURL,
-		JWTSecret:      jwtSecret,
-		FrontendOrigin: frontendOrigin,
-		WorkerInterval: workerInterval,
+		Port:               port,
+		Env:                env,
+		DatabaseURL:        dbURL,
+		JWTSecret:          jwtSecret,
+		FrontendOrigin:     frontendOrigin,
+		WorkerInterval:     workerInterval,
+		BrevoAPIKey:        brevoKey,
+		BrevoSenderEmail:   brevoEmail,
+		BrevoSenderName:    brevoName,
+		GoogleClientID:     googleClientID,
+		GoogleClientSecret: googleClientSecret,
+		GoogleRedirectURL:  googleRedirectURL,
+		OTPExpiry:          time.Duration(otpExpiryMinutes) * time.Minute,
+		OTPCooldown:        time.Duration(otpCooldownSeconds) * time.Second,
+		OTPMaxAttempts:     otpMaxAttempts,
+		OTPLength:          otpLength,
 	}
 
 	if err := cfg.validate(); err != nil {

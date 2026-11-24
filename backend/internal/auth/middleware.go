@@ -26,11 +26,9 @@ func UserIDFromContext(ctx context.Context) (string, bool) {
 	return userID, ok
 }
 
-// Go Concept - Middleware Closures:
-// In Go, HTTP middleware is a function that accepts an `http.Handler` and returns a new `http.Handler`.
-// Here, `RequireAuth` takes a `*TokenManager` parameter and returns a closure that has access
-// to the token manager when handling incoming HTTP requests.
-func RequireAuth(tokenMgr *TokenManager) func(http.Handler) http.Handler {
+// RequireAuth reads the session cookie, validates the JWT, checks that the user's
+// database token_version has not been revoked (e.g. after a password change), and loads the user ID into context.
+func RequireAuth(tokenMgr *TokenManager, repo Repository) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			cookie, err := r.Cookie(CookieName)
@@ -39,9 +37,18 @@ func RequireAuth(tokenMgr *TokenManager) func(http.Handler) http.Handler {
 				return
 			}
 
-			userID, err := tokenMgr.ValidateToken(cookie.Value)
+			userID, claimVersion, err := tokenMgr.ValidateToken(cookie.Value)
 			if err != nil {
 				_ = httpx.WriteError(w, http.StatusUnauthorized, "invalid or expired authentication token")
+				return
+			}
+
+			// Go Concept - Instant Session Revocation via Token Versioning:
+			// If a user changed their password or triggered a security logout, their database `token_version`
+			// is incremented. Any older JWT in circulation carrying an outdated version is rejected immediately.
+			user, err := repo.GetUserByID(r.Context(), userID)
+			if err != nil || user.TokenVersion != claimVersion {
+				_ = httpx.WriteError(w, http.StatusUnauthorized, "session has been invalidated; please log in again")
 				return
 			}
 
@@ -51,4 +58,3 @@ func RequireAuth(tokenMgr *TokenManager) func(http.Handler) http.Handler {
 		})
 	}
 }
-

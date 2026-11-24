@@ -1,10 +1,12 @@
 /**
  * Spendle API client
- * Communicates with the Go backend through Vite's dev-server proxy at /api.
+ * Communicates with the Go backend through Vite's dev-server proxy at /api
+ * or via Vercel rewrite / custom base URL.
  * Includes credentials ('include') so the httpOnly cookie is automatically passed.
  */
 
-const BASE_PATH = '/api/v1';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+const BASE_PATH = `${API_BASE}/api/v1`;
 
 export async function request(endpoint, options = {}) {
   const { body, headers = {}, ...customConfig } = options;
@@ -56,7 +58,14 @@ export const authApi = {
   me: () => request('/auth/me'),
   login: (email, password) => request('/auth/login', { body: { email, password } }),
   signup: (name, email, password) => request('/auth/signup', { body: { name, email, password } }),
+  verifyEmail: (email, code) => request('/auth/verify-email', { body: { email, code } }),
+  resendOtp: (email, purpose = 'email_verification') =>
+    request('/auth/resend-otp', { body: { email, purpose } }),
+  forgotPassword: (email) => request('/auth/forgot-password', { body: { email } }),
+  resetPassword: (email, code, new_password) =>
+    request('/auth/reset-password', { body: { email, code, new_password } }),
   logout: () => request('/auth/logout', { method: 'POST' }),
+  googleLoginUrl: `${BASE_PATH}/auth/google/login`,
 };
 
 // Dashboard API
@@ -91,4 +100,3 @@ export const goalApi = {
   delete: (id) => request(`/goals/${id}`, { method: 'DELETE' }),
   closeMonth: (month) => request('/months/close', { body: { month } }),
 };
-

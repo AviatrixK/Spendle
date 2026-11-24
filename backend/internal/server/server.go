@@ -14,6 +14,7 @@ import (
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/dashboard"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/goal"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/httpx"
+	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/mailer"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/middleware"
 	"github.com/YOUR_GITHUB_USERNAME/spendle/internal/transaction"
 )
@@ -97,11 +98,17 @@ func (s *Server) mountRoutes() {
 	// Root-level health check: GET /ping
 	s.router.Get("/ping", pingHandler)
 
+	// Mailer: Initialize Brevo email client
+	emailClient := mailer.NewBrevoMailer(s.cfg.BrevoAPIKey, s.cfg.BrevoSenderEmail, s.cfg.BrevoSenderName, s.logger)
+
 	// Dependency Injection: Initialize Auth components
 	tokenMgr := auth.NewTokenManager(s.cfg.JWTSecret)
 	authRepo := auth.NewPGRepository(s.db)
-	authService := auth.NewService(authRepo, tokenMgr)
-	authHandler := auth.NewHandler(authService, s.cfg.Env == "production")
+	authService := auth.NewService(authRepo, tokenMgr, emailClient, s.cfg)
+	authHandler := auth.NewHandler(authService, s.cfg)
+
+	// Rate Limiting: 10 requests per minute for sensitive authentication endpoints
+	authLimiter := middleware.NewIPRateLimiter(10, 1*time.Minute)
 
 	// Dependency Injection: Initialize Budget components
 	budgetRepo := budget.NewPGRepository(s.db)
@@ -133,20 +140,34 @@ func (s *Server) mountRoutes() {
 
 		// Auth endpoints: /api/v1/auth
 		r.Route("/auth", func(r chi.Router) {
-			r.Post("/signup", authHandler.Signup)
-			r.Post("/login", authHandler.Login)
+			// Rate-limited sensitive authentication routes (signup, verify, resend, login, forgot, reset)
+			r.Group(func(r chi.Router) {
+				r.Use(authLimiter.Limit)
+				r.Post("/signup", authHandler.Signup)
+				r.Post("/verify-email", authHandler.VerifyEmail)
+				r.Post("/resend-otp", authHandler.ResendOTP)
+				r.Post("/login", authHandler.Login)
+				r.Post("/forgot-password", authHandler.ForgotPassword)
+				r.Post("/reset-password", authHandler.ResetPassword)
+			})
+
+			// Google OAuth routes (modular / gracefully configurable)
+			r.Get("/google/login", authHandler.GoogleLogin)
+			r.Get("/google/callback", authHandler.GoogleCallback)
+
+			// Logout
 			r.Post("/logout", authHandler.Logout)
 
 			// Protected auth route
 			r.Group(func(r chi.Router) {
-				r.Use(auth.RequireAuth(tokenMgr))
+				r.Use(auth.RequireAuth(tokenMgr, authRepo))
 				r.Get("/me", authHandler.Me)
 			})
 		})
 
 		// Protected domain routes: Categories, Budgets, Transactions, Goals, Dashboard
 		r.Group(func(r chi.Router) {
-			r.Use(auth.RequireAuth(tokenMgr))
+			r.Use(auth.RequireAuth(tokenMgr, authRepo))
 
 			// Category endpoints
 			r.Get("/categories", budgetHandler.ListCategories)

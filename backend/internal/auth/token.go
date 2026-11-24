@@ -7,6 +7,12 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// SpendleClaims represents the structured claims encoded within the authentication JWT.
+type SpendleClaims struct {
+	jwt.RegisteredClaims
+	TokenVersion int `json:"ver"`
+}
+
 // TokenManager manages creation and cryptographic verification of JWT authentication tokens.
 type TokenManager struct {
 	secret []byte
@@ -17,13 +23,16 @@ func NewTokenManager(secret string) *TokenManager {
 	return &TokenManager{secret: []byte(secret)}
 }
 
-// GenerateToken produces an HS256 signed JWT with `sub`, `iat`, and a 7-day expiration.
-func (tm *TokenManager) GenerateToken(userID string) (string, error) {
+// GenerateToken produces an HS256 signed JWT with `sub`, `ver`, `iat`, and a 7-day expiration.
+func (tm *TokenManager) GenerateToken(userID string, tokenVersion int) (string, error) {
 	now := time.Now()
-	claims := jwt.RegisteredClaims{
-		Subject:   userID,
-		IssuedAt:  jwt.NewNumericDate(now),
-		ExpiresAt: jwt.NewNumericDate(now.Add(7 * 24 * time.Hour)),
+	claims := SpendleClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   userID,
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(7 * 24 * time.Hour)),
+		},
+		TokenVersion: tokenVersion,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -35,16 +44,10 @@ func (tm *TokenManager) GenerateToken(userID string) (string, error) {
 	return signed, nil
 }
 
-// ValidateToken parses and cryptographically validates the token string.
-//
-// Go Concept - JWT Algorithm Confusion Defense:
-// A common vulnerability in JWT implementations is accepting an attacker's chosen header algorithm.
-// For example, if an attacker changes the header to `"alg": "none"`, insecure libraries might treat
-// the token as valid without verifying any signature.
-// By strictly verifying `t.Method.(*jwt.SigningMethodHMAC)`, we guarantee that tokens signed with
-// `"none"`, asymmetric keys, or unsupported algorithms are rejected immediately.
-func (tm *TokenManager) ValidateToken(tokenStr string) (string, error) {
-	token, err := jwt.ParseWithClaims(tokenStr, &jwt.RegisteredClaims{}, func(t *jwt.Token) (any, error) {
+// ValidateToken parses and cryptographically validates the token string, asserting the HMAC algorithm.
+// Returns the subject user ID and token version encoded in the claims.
+func (tm *TokenManager) ValidateToken(tokenStr string) (string, int, error) {
+	token, err := jwt.ParseWithClaims(tokenStr, &SpendleClaims{}, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method %v (HMAC required)", t.Header["alg"])
 		}
@@ -52,14 +55,13 @@ func (tm *TokenManager) ValidateToken(tokenStr string) (string, error) {
 	})
 
 	if err != nil || !token.Valid {
-		return "", ErrInvalidToken
+		return "", 0, ErrInvalidToken
 	}
 
-	claims, ok := token.Claims.(*jwt.RegisteredClaims)
+	claims, ok := token.Claims.(*SpendleClaims)
 	if !ok || claims.Subject == "" {
-		return "", ErrInvalidToken
+		return "", 0, ErrInvalidToken
 	}
 
-	return claims.Subject, nil
+	return claims.Subject, claims.TokenVersion, nil
 }
-
