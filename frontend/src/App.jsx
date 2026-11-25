@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard';
 import Goals from './pages/Goals';
 import AmbientBackground from './components/AmbientBackground';
 import CustomCursor from './components/CustomCursor';
+import SpendleLoader from './components/SpendleLoader';
 
 // Lazy-load landing page so app bundle stays small
 const Landing = lazy(() => import('./landing/Landing'));
@@ -25,11 +26,7 @@ function ProtectedRoute({ children }) {
   });
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-muted font-mono text-xs">
-        Checking session...
-      </div>
-    );
+    return <SpendleLoader label="Checking your session" />;
   }
 
   if (isError || !user) {
@@ -52,11 +49,7 @@ function PublicRoute({ children }) {
   });
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-muted font-mono text-xs">
-        Loading...
-      </div>
-    );
+    return <SpendleLoader label="Checking your session" />;
   }
 
   if (user) {
@@ -80,11 +73,7 @@ function HomeRoute() {
   });
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-muted font-mono text-xs">
-        Loading...
-      </div>
-    );
+    return <SpendleLoader label="Preparing your dashboard" />;
   }
 
   if (user) {
@@ -94,9 +83,7 @@ function HomeRoute() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen flex items-center justify-center text-muted font-mono text-xs">
-          Loading...
-        </div>
+        <SpendleLoader label="Loading Spendle" />
       }
     >
       <Landing />
@@ -104,11 +91,15 @@ function HomeRoute() {
   );
 }
 
+function WelcomeRoute() {
+  return <Suspense fallback={<SpendleLoader label="Loading Spendle" />}><Landing /></Suspense>;
+}
+
 export default function App() {
   return (
     <div className="relative min-h-screen bg-bg text-main selection:bg-accent selection:text-bg">
       {/* 1. Global Ambient Background: Dot-Grid Canvas & 500px Radial Spotlight at -z-10 */}
-      <AmbientBackground intensity="soft" />
+      <AmbientBackground intensity="full" />
 
       {/* 2. Global Custom Cursor: Gold Dot & Lagging Ring at z-[9999] */}
       <CustomCursor />
@@ -123,6 +114,7 @@ export default function App() {
           }
         />
         <Route path="/" element={<HomeRoute />} />
+        <Route path="/welcome" element={<WelcomeRoute />} />
         <Route
           path="/goals"
           element={

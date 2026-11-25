@@ -107,7 +107,7 @@ export default function MonthScroll() {
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
           <div>
             <span className="text-[11px] font-mono uppercase tracking-[0.2em] text-accent block mb-1">
-              The Signature Sequence
+              Illustrative month journey
             </span>
             <h2 className="text-3xl sm:text-5xl font-serif text-main tracking-tight">
               A month, in <em className="italic text-accent font-normal">one scroll</em>.

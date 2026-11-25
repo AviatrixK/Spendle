@@ -34,15 +34,11 @@ export default function CtaFooter() {
         {/* Big Swelling CTA Button with Anchor for Travelling Dot */}
         <div className="pt-4 flex items-center justify-center">
           <Link
-            to="/login"
+            to="/login?mode=signup"
             data-magnetic
             className="group relative inline-flex items-center gap-2.5 px-8 py-4 rounded-full bg-accent text-[#0E0E11] text-base font-semibold hover:bg-accent-hover transition-all active:scale-95 shadow-xl shadow-accent/25 hover:shadow-accent/40"
           >
             <span>Get started with Spendle</span>
-            <span
-              data-dot-anchor="cta-dot"
-              className="w-2.5 h-2.5 rounded-full bg-[#0E0E11] inline-block transition-transform group-hover:scale-125"
-            />
           </Link>
         </div>
       </div>

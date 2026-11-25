@@ -1,47 +1,108 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import GlassCard from '../components/GlassCard';
 import ProgressBar from '../components/ProgressBar';
 import Fab from '../components/Fab';
+import MerchantLogo from '../components/MerchantLogo';
 import QuickAddSheet from '../components/QuickAddSheet';
 import BudgetModal from '../components/BudgetModal';
 import { formatINR, monthKey, formatMonthName, prevMonthKey, nextMonthKey } from '../lib/format';
 import { dashboardApi, budgetApi, transactionApi, authApi } from '../api';
 
+const iconFor = (name = '') => {
+  const value = name.toLowerCase();
+  if (/food|dining|restaurant/.test(value)) return '🍜';
+  if (/grocer|market/.test(value)) return '🛒';
+  if (/transport|travel|fuel|cab/.test(value)) return '🚕';
+  if (/bill|utilities|rent/.test(value)) return '⚡';
+  if (/entertain|movie|subscription/.test(value)) return '🎬';
+  if (/shop/.test(value)) return '🛍';
+  if (/health|medical/.test(value)) return '✚';
+  if (/education|study/.test(value)) return '📚';
+  return '◌';
+};
+
+function AreaChart({ transactions, type }) {
+  const dayCount = Math.max(1, new Date(Number(transactions.month?.slice(0, 4)), Number(transactions.month?.slice(5, 7)) || 1, 0).getDate());
+  const values = Array.from({ length: dayCount }, () => 0);
+  transactions.items.forEach((tx) => {
+    if (tx.type !== type) return;
+    const day = Number(tx.occurred_on?.slice(-2)) - 1;
+    if (day >= 0 && day < dayCount) values[day] += Number(tx.amount_paise || 0);
+  });
+  let running = 0;
+  const cumulative = values.map((value) => (running += value));
+  const max = Math.max(...cumulative, 1);
+  const points = cumulative.map((value, i) => `${(i / Math.max(1, dayCount - 1)) * 100},${48 - (value / max) * 35}`).join(' ');
+  const last = cumulative.at(-1) || 0;
+  return (
+    <div className="balance-chart" aria-label={`${type === 'income' ? 'Income' : 'Expense'} trend this month`}>
+      <svg viewBox="0 0 100 54" preserveAspectRatio="none" role="img" aria-hidden="true">
+        <defs><linearGradient id="balance-fill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#F2C76A" stopOpacity=".28" /><stop offset="1" stopColor="#F2C76A" stopOpacity="0" /></linearGradient></defs>
+        <polygon points={`0,54 ${points} 100,54`} fill="url(#balance-fill)" />
+        <polyline points={points} fill="none" stroke="#F2C76A" strokeWidth="1.2" vectorEffect="non-scaling-stroke" />
+      </svg>
+      <span className="chart-tooltip">{formatINR(last)}</span>
+      <div className="chart-axis"><span>1 {formatMonthName(transactions.month).split(' ')[0]}</span><span>{dayCount} {formatMonthName(transactions.month).split(' ')[0]}</span></div>
+    </div>
+  );
+}
+
+function GoalRing({ percent = 0 }) {
+  const progress = Math.max(0, Math.min(100, Number(percent)));
+  return <span className="goal-ring" style={{ '--progress': `${progress * 3.6}deg` }}><span>{progress}%</span></span>;
+}
+
 export default function Dashboard() {
   const [selectedMonth, setSelectedMonth] = useState(() => monthKey());
+  const [chartType, setChartType] = useState('expense');
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const [quickAddType, setQuickAddType] = useState('expense');
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
-
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const location = useLocation();
+  const currentUser = queryClient.getQueryData(['auth', 'me']);
 
-  // Load Dashboard Aggregate data
-  const {
-    data: dashboardData,
-    isLoading: isDashboardLoading,
-    error: dashboardError,
-  } = useQuery({
-    queryKey: ['dashboard', selectedMonth],
-    queryFn: () => dashboardApi.get(selectedMonth),
+  useEffect(() => {
+    const action = new URLSearchParams(location.search).get('quickAdd');
+    if (action === 'expense' || action === 'income') {
+      setQuickAddType(action);
+      setIsQuickAddOpen(true);
+      navigate('/', { replace: true });
+    }
+  }, [location.search, navigate]);
+
+  useEffect(() => {
+    if (!isAccountMenuOpen) return undefined;
+    function handlePointerDown(event) {
+      if (!accountMenuRef.current?.contains(event.target)) setIsAccountMenuOpen(false);
+    }
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') setIsAccountMenuOpen(false);
+    }
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isAccountMenuOpen]);
+  const { data: dashboardData, isLoading: isDashboardLoading, error: dashboardError, refetch } = useQuery({
+    queryKey: ['dashboard', selectedMonth], queryFn: () => dashboardApi.get(selectedMonth),
   });
-
-  // Load Categories for Quick-Add chips and Budget modal
-  const { data: categories = [] } = useQuery({
-    queryKey: ['categories'],
-    queryFn: budgetApi.getCategories,
+  const { data: previousData } = useQuery({
+    queryKey: ['dashboard', prevMonthKey(selectedMonth)], queryFn: () => dashboardApi.get(prevMonthKey(selectedMonth)),
+    retry: false,
   });
-
-  // Load Recent Transactions (limit 10)
+  const { data: categories = [] } = useQuery({ queryKey: ['categories'], queryFn: budgetApi.getCategories });
   const { data: transactions = [] } = useQuery({
-    queryKey: ['transactions', selectedMonth],
-    queryFn: () => transactionApi.list(selectedMonth, 10),
+    queryKey: ['transactions', selectedMonth, 200], queryFn: () => transactionApi.list(selectedMonth, 200),
   });
-
-  // Delete transaction mutation
   const deleteTxMutation = useMutation({
     mutationFn: (id) => transactionApi.delete(id),
     onSuccess: () => {
@@ -50,399 +111,136 @@ export default function Dashboard() {
     },
   });
 
-  // Logout handler
   async function handleLogout() {
-    try {
-      await authApi.logout();
-    } catch {
-      // ignore
-    } finally {
-      queryClient.clear();
-      navigate('/login', { replace: true });
-    }
+    try { await authApi.logout(); } catch { /* session is cleared locally below */ }
+    queryClient.clear();
+    navigate('/login', { replace: true });
   }
-
   function refreshAllData() {
-    queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-    queryClient.invalidateQueries({ queryKey: ['transactions'] });
-    queryClient.invalidateQueries({ queryKey: ['categories'] });
-    queryClient.invalidateQueries({ queryKey: ['budgets'] });
-    queryClient.invalidateQueries({ queryKey: ['goals'] });
+    ['dashboard', 'transactions', 'categories', 'budgets', 'goals'].forEach((key) => queryClient.invalidateQueries({ queryKey: [key] }));
   }
 
   const summary = dashboardData?.summary || { income_paise: 0, expense_paise: 0, net_paise: 0 };
   const budgets = dashboardData?.budgets || { total_limit_paise: 0, total_spent_paise: 0, total_left_paise: 0, items: [] };
   const goals = dashboardData?.goals || [];
-  const topGoals = goals.slice(0, 3);
   const status = dashboardData?.status || 'break_even';
+  const overBudget = budgets.items.filter((item) => item.left_paise < 0);
+  const budgetPct = budgets.total_limit_paise > 0 ? Math.round(budgets.total_spent_paise * 100 / budgets.total_limit_paise) : 0;
+  const showAlert = overBudget.length > 0 || (budgets.total_limit_paise > 0 && budgetPct >= 80);
+  const trend = previousData?.summary?.expense_paise > 0
+    ? Math.round((summary.expense_paise - previousData.summary.expense_paise) * 100 / previousData.summary.expense_paise)
+    : null;
+  const chartData = useMemo(() => ({ month: selectedMonth, items: transactions }), [selectedMonth, transactions]);
+  const recentGroups = useMemo(() => {
+    const groups = new Map();
+    transactions.slice(0, 10).forEach((tx) => {
+      if (!groups.has(tx.occurred_on)) groups.set(tx.occurred_on, []);
+      groups.get(tx.occurred_on).push(tx);
+    });
+    return [...groups.entries()];
+  }, [transactions]);
 
   return (
-    <div className="min-h-screen pb-28 pt-4 px-4">
-      <div className="max-w-[720px] mx-auto space-y-6">
-        {/* Top Bar */}
-        <header className="flex items-center justify-between py-2 border-b border-white/5">
-          <div className="flex items-baseline gap-1">
-            <span className="font-serif text-2xl text-main tracking-tight">Spendle</span>
-            <span className="w-1.5 h-1.5 rounded-full bg-accent" />
+    <main className="dashboard-page">
+      <div className="dashboard-wrap">
+        <header className="dashboard-topbar">
+          <Link to="/" className="brand-wordmark" aria-label="Spendle home">Spendle<span /></Link>
+          <div className="month-control" aria-label="Choose month">
+            <button type="button" aria-label="Previous month" onClick={() => setSelectedMonth(prevMonthKey(selectedMonth))}>‹</button>
+            <span>{formatMonthName(selectedMonth)}</span>
+            <button type="button" aria-label="Next month" onClick={() => setSelectedMonth(nextMonthKey(selectedMonth))}>›</button>
           </div>
-
-          {/* Month Switcher */}
-          <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-full border border-white/10">
-            <button
-              type="button"
-              onClick={() => setSelectedMonth(prevMonthKey(selectedMonth))}
-              className="text-muted hover:text-main text-sm px-1.5 transition-colors"
-              aria-label="Previous month"
-            >
-              ‹
-            </button>
-            <span className="font-serif text-sm tracking-wide text-main min-w-[76px] text-center">
-              {formatMonthName(selectedMonth)}
-            </span>
-            <button
-              type="button"
-              onClick={() => setSelectedMonth(nextMonthKey(selectedMonth))}
-              className="text-muted hover:text-main text-sm px-1.5 transition-colors"
-              aria-label="Next month"
-            >
-              ›
-            </button>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <Link
-              to="/goals"
-              className="text-xs font-medium text-muted hover:text-accent transition-colors"
-            >
-              Goals
-            </Link>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="text-xs text-muted hover:text-semantic-loss transition-colors"
-            >
-              Logout
+          <div className="topbar-actions">
+            <div className="account-menu-wrap" ref={accountMenuRef}>
+              <button type="button" className="avatar-chip" title="Account options" aria-label="Account options" aria-haspopup="menu" aria-expanded={isAccountMenuOpen} onClick={() => setIsAccountMenuOpen((open) => !open)}>
+                {(currentUser?.name || currentUser?.email || 'S').trim().charAt(0).toUpperCase()}
+              </button>
+              {isAccountMenuOpen && <div className="account-menu" role="menu" aria-label="Account options">
+                <div className="account-menu-heading"><strong>Your account</strong><span>{currentUser?.email || 'Signed in to Spendle'}</span></div>
+                <Link role="menuitem" to="/goals" onClick={() => setIsAccountMenuOpen(false)}>Savings goals <span aria-hidden="true">→</span></Link>
+                <button role="menuitem" type="button" onClick={handleLogout}>Log out</button>
+              </div>}
+            </div>
+            <button type="button" className="calendar-button" aria-label="Go to current month" onClick={() => setSelectedMonth(monthKey())}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="16" rx="3" /><path d="M7.5 3.5v3M16.5 3.5v3M4 9.5h16" /></svg>
             </button>
           </div>
         </header>
 
         {isDashboardLoading ? (
-          <div className="text-center py-16 text-muted text-sm animate-pulse font-mono">
-            Loading dashboard data...
-          </div>
+          <section className="dashboard-skeleton" aria-label="Loading dashboard"><div /><div /><div /><div /></section>
         ) : dashboardError ? (
-          <GlassCard className="p-6 text-center text-semantic-loss text-sm">
-            {dashboardError.message || 'Failed to load dashboard data'}
-          </GlassCard>
+          <section className="dashboard-error" role="alert"><p>Couldn’t load this month’s numbers.</p><button onClick={() => refetch()}>Try again</button></section>
         ) : (
           <>
-            {/* Status Banner */}
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.25 }}
-            >
-              <GlassCard className="text-center p-6 border-white/10 relative overflow-hidden">
-                <div className="text-xs font-mono uppercase tracking-wider text-muted mb-1">
-                  Monthly Balance
-                </div>
-
-                <div className="flex items-center justify-center gap-2 mb-2">
-                  <span
-                    className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                      status === 'profit'
-                        ? 'bg-semantic-profit/15 text-semantic-profit border border-semantic-profit/30'
-                        : status === 'loss'
-                        ? 'bg-semantic-loss/15 text-semantic-loss border border-semantic-loss/30'
-                        : 'bg-white/10 text-muted border border-white/15'
-                    }`}
-                  >
-                    {status === 'profit'
-                      ? 'In profit'
-                      : status === 'loss'
-                      ? 'In loss'
-                      : 'Break-even'}
-                  </span>
-                </div>
-
-                <div
-                  className={`text-4xl sm:text-5xl font-serif font-medium tracking-tight mb-4 ${
-                    status === 'profit'
-                      ? 'text-semantic-profit'
-                      : status === 'loss'
-                      ? 'text-semantic-loss'
-                      : 'text-main'
-                  }`}
-                >
-                  {summary.net_paise < 0 ? '-' : ''}
-                  {formatINR(Math.abs(summary.net_paise))}
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 pt-4 border-t border-white/5 font-mono text-xs">
-                  <div>
-                    <span className="text-muted block mb-0.5">Income</span>
-                    <span className="text-semantic-profit font-medium">
-                      +{formatINR(summary.income_paise)}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-muted block mb-0.5">Expenses</span>
-                    <span className="text-main font-medium">
-                      -{formatINR(summary.expense_paise)}
-                    </span>
-                  </div>
-                </div>
-              </GlassCard>
-            </motion.div>
-
-            {/* Budgets Section */}
-            <motion.section
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.25, delay: 0.05 }}
-              className="space-y-3"
-            >
-              <div className="flex items-center justify-between px-1">
-                <h2 className="font-serif text-lg text-main">Monthly Budgets</h2>
-                <button
-                  type="button"
-                  onClick={() => setIsBudgetModalOpen(true)}
-                  className="text-xs text-accent hover:text-accent-hover font-medium transition-colors"
-                >
-                  + Set Budget
-                </button>
+            <motion.section className="balance-panel" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+              <div className="balance-panel-top">
+                <div><span className="eyebrow">{selectedMonth === monthKey() ? 'YOUR MONTH AT A GLANCE' : formatMonthName(selectedMonth).toUpperCase()}</span><h1>Kitna bacha?</h1></div>
+                <span className={`status-chip status-${status}`}>{status === 'profit' ? 'In profit' : status === 'loss' ? 'In loss' : 'Break-even'}</span>
               </div>
-
-              <GlassCard className="space-y-4">
-                {budgets.items.length === 0 ? (
-                  <div className="text-center py-6">
-                    <p className="text-xs text-muted mb-3">
-                      No budgets yet. Set one to see what's left.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => setIsBudgetModalOpen(true)}
-                      className="text-xs px-3 py-1.5 rounded-lg bg-accent/15 border border-accent/30 text-accent font-medium hover:bg-accent/25 transition-all"
-                    >
-                      Set first budget
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="space-y-3.5 divide-y divide-white/5">
-                      {budgets.items.map((item) => {
-                        const isOver = item.left_paise < 0;
-                        const pct = item.limit_paise > 0
-                          ? Math.round((item.spent_paise * 100) / item.limit_paise)
-                          : 0;
-
-                        return (
-                          <div key={item.category_id} className="pt-3 first:pt-0">
-                            <div className="flex items-baseline justify-between text-xs mb-1.5">
-                              <span className="font-medium text-main">{item.category_name}</span>
-                              <span className="font-mono text-muted text-[11px]">
-                                {formatINR(item.spent_paise)} of {formatINR(item.limit_paise)}
-                              </span>
-                            </div>
-
-                            <ProgressBar
-                              percent={pct}
-                              isOverspent={isOver}
-                              height="h-1.5"
-                              className="mb-1.5"
-                            />
-
-                            <div className="flex items-center justify-between text-[11px] font-mono">
-                              <span className="text-muted">{pct}% spent</span>
-                              <span className={isOver ? 'text-semantic-loss font-semibold' : 'text-muted'}>
-                                {isOver
-                                  ? `${formatINR(Math.abs(item.left_paise))} over`
-                                  : `${formatINR(item.left_paise)} left`}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Total Row */}
-                    <div className="pt-3 border-t border-white/10 flex items-center justify-between text-xs font-mono">
-                      <span className="text-muted uppercase tracking-wider text-[10px]">Total</span>
-                      <div className="text-right">
-                        <span className="text-muted mr-2">
-                          {formatINR(budgets.total_spent_paise)} of {formatINR(budgets.total_limit_paise)}
-                        </span>
-                        <span className={budgets.total_left_paise < 0 ? 'text-semantic-loss font-semibold' : 'text-accent font-semibold'}>
-                          • {budgets.total_left_paise < 0
-                            ? `${formatINR(Math.abs(budgets.total_left_paise))} over`
-                            : `${formatINR(budgets.total_left_paise)} left`}
-                        </span>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </GlassCard>
+              <p className={`balance-number ${budgets.total_left_paise < 0 ? 'is-over' : ''}`}>
+                {formatINR(budgets.total_limit_paise ? budgets.total_left_paise : summary.net_paise)}
+              </p>
+              <div className="balance-meta">
+                <span>{budgets.total_limit_paise ? 'left in your budget' : 'income after expenses'}</span>
+                {trend !== null && <span className={`trend-chip ${trend > 0 ? 'trend-up' : 'trend-down'}`} aria-label={`${Math.abs(trend)} percent change vs last month`}>{trend > 0 ? '↑' : '↓'} {Math.abs(trend)}% vs last month</span>}
+              </div>
+              <div className="balance-segment" role="group" aria-label="Chart measure">
+                <button type="button" className={chartType === 'income' ? 'selected' : ''} onClick={() => setChartType('income')}>Income</button>
+                <button type="button" className={chartType === 'expense' ? 'selected' : ''} onClick={() => setChartType('expense')}>Expenses</button>
+              </div>
+              <AreaChart transactions={chartData} type={chartType} />
             </motion.section>
 
-            {/* Goals Preview */}
-            <motion.section
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.25, delay: 0.1 }}
-              className="space-y-3"
-            >
-              <div className="flex items-center justify-between px-1">
-                <h2 className="font-serif text-lg text-main">Savings Goals</h2>
-                <Link
-                  to="/goals"
-                  className="text-xs text-accent hover:text-accent-hover font-medium transition-colors"
-                >
-                  View all ({goals.length}) →
-                </Link>
-              </div>
+            {showAlert && <aside className="budget-alert" role="status"><span className="alert-icon">!</span><p>{overBudget.length ? `${overBudget[0].category_name} is over by ${formatINR(Math.abs(overBudget[0].left_paise))}` : `You’ve used ${budgetPct}% of your monthly budget`}</p><button type="button" onClick={() => setIsBudgetModalOpen(true)}>Review</button></aside>}
 
-              <GlassCard className="space-y-3">
-                {topGoals.length === 0 ? (
-                  <div className="text-center py-6">
-                    <p className="text-xs text-muted mb-2">No savings goals created yet.</p>
-                    <Link
-                      to="/goals"
-                      className="text-xs text-accent hover:underline font-medium"
-                    >
-                      + Create your first savings goal
-                    </Link>
-                  </div>
-                ) : (
-                  topGoals.map((g) => (
-                    <Link
-                      key={g.id}
-                      to="/goals"
-                      className="block p-2.5 -mx-2.5 rounded-xl hover:bg-white/5 transition-colors"
-                    >
-                      <div className="flex items-baseline justify-between text-xs mb-1.5">
-                        <span className="font-medium text-main flex items-center gap-1.5">
-                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/10 text-muted">
-                            #{g.priority}
-                          </span>
-                          {g.title}
-                        </span>
-                        <span className="font-mono text-muted text-[11px]">
-                          {g.progress_percent}% of {formatINR(g.target_paise)}
-                        </span>
-                      </div>
-                      <ProgressBar percent={g.progress_percent} height="h-1.5" />
-                    </Link>
-                  ))
-                )}
-              </GlassCard>
-            </motion.section>
+            <section className="budget-card">
+              <div className="section-heading"><div><span className="eyebrow">THIS MONTH</span><h2>Budget overview</h2></div><button type="button" className="text-action" onClick={() => setIsBudgetModalOpen(true)}>{budgets.items.length ? 'Edit' : 'Set budget'} <span aria-hidden="true">↗</span></button></div>
+              {budgets.items.length === 0 ? <div className="inline-empty"><p>Set a budget to see exactly what’s left.</p><button type="button" onClick={() => setIsBudgetModalOpen(true)}>Set your first budget</button></div> : <>
+                <div className="budget-total"><div><span className="eyebrow">AVAILABLE</span><strong className={budgets.total_left_paise < 0 ? 'is-over' : ''}>{formatINR(budgets.total_left_paise)}</strong></div><div className="budget-spent"><span>spent</span><b>{formatINR(budgets.total_spent_paise)}</b><span>of {formatINR(budgets.total_limit_paise)}</span></div></div>
+                <ProgressBar percent={budgetPct} isOverspent={budgets.total_left_paise < 0} height="h-2" />
+                <div className="segment-bar" role="img" aria-label="Budget split by category">{budgets.items.map((item, i) => <span key={item.category_id} style={{ width: `${Math.max(2, (item.limit_paise / Math.max(1, budgets.total_limit_paise)) * 100)}%`, background: ['#e9bd61', '#74d6a6', '#e28a7d', '#a99cd7', '#80b9c8'][i % 5] }} />)}</div>
+                <div className="budget-legend">{budgets.items.slice(0, 4).map((item, i) => <span key={item.category_id}><i style={{ background: ['#e9bd61', '#74d6a6', '#e28a7d', '#a99cd7'][i % 4] }} />{item.category_name}</span>)}</div>
+              </>}
+            </section>
 
-            {/* Recent Transactions */}
-            <motion.section
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.25, delay: 0.15 }}
-              className="space-y-3"
-            >
-              <div className="flex items-center justify-between px-1">
-                <h2 className="font-serif text-lg text-main">Recent Transactions</h2>
-                <span className="text-xs font-mono text-muted">
-                  {transactions.length} this month
-                </span>
-              </div>
+            <section className="categories-section">
+              <div className="section-heading"><div><span className="eyebrow">SPENDING PLAN</span><h2>Categories</h2></div><button type="button" className="text-action" onClick={() => setIsBudgetModalOpen(true)}>View all <span aria-hidden="true">→</span></button></div>
+              {budgets.items.length ? <div className="category-grid">{budgets.items.slice(0, 6).map((item, i) => {
+                const percent = item.limit_paise ? item.spent_paise * 100 / item.limit_paise : 0;
+                const over = item.left_paise < 0;
+                return <button type="button" key={item.category_id} className="category-card" onClick={() => setIsBudgetModalOpen(true)}>
+                  <span className="category-top"><span className="category-icon" style={{ '--icon-tint': ['#f4dca8', '#b8e8d3', '#f1c6c0', '#d3c9f0'][i % 4] }}>{iconFor(item.category_name)}</span><span className={`category-status ${over ? 'is-over' : ''}`}>{over ? 'Over' : `${Math.round(percent)}%`}</span></span>
+                  <span className="category-name">{item.category_name}</span><strong>{formatINR(item.spent_paise)}</strong>
+                  <ProgressBar percent={percent} isOverspent={over} height="h-1.5" />
+                  <span className={`category-left ${over ? 'is-over' : ''}`}>{over ? `Over by ${formatINR(Math.abs(item.left_paise))}` : `${formatINR(item.left_paise)} left`}</span>
+                </button>;
+              })}</div> : <div className="category-empty"><span>◌</span><p>Category budgets will show up here.</p><button onClick={() => setIsBudgetModalOpen(true)}>Add a budget</button></div>}
+            </section>
 
-              <GlassCard className="p-0 overflow-hidden divide-y divide-white/5">
-                {transactions.length === 0 ? (
-                  <div className="text-center py-8 px-4 text-xs text-muted">
-                    No transactions logged for {formatMonthName(selectedMonth)} yet.
-                    <br />Tap <span className="text-accent font-semibold">+ Expense</span> or <span className="text-main font-semibold">+ Income</span> below to add one.
-                  </div>
-                ) : (
-                  transactions.map((tx) => {
-                    const isIncome = tx.type === 'income';
+            <section className="goals-section">
+              <div className="section-heading"><div><span className="eyebrow">SAVING FOR SOMETHING</span><h2>Goals</h2></div><Link className="text-action" to="/goals">View all <span aria-hidden="true">→</span></Link></div>
+              {goals.length ? <div className="goal-scroller">{goals.slice(0, 6).map((goal) => <Link to="/goals" className="goal-card" key={goal.id}><GoalRing percent={goal.progress_percent} /><span className="goal-copy"><strong>{goal.title}</strong><span>{formatINR(goal.saved_paise)} saved</span><small>of {formatINR(goal.target_paise)}</small></span><span className="goal-arrow">↗</span></Link>)}</div> : <div className="goal-empty"><p>Give your next big thing a place to grow.</p><Link to="/goals">Create a goal <span>→</span></Link></div>}
+            </section>
 
-                    return (
-                      <div
-                        key={tx.id}
-                        className="flex items-center justify-between p-3.5 hover:bg-white/[0.02] transition-colors"
-                      >
-                        <div className="flex-1 min-w-0 pr-3">
-                          <div className="flex items-center gap-2 mb-0.5">
-                            <span className="text-xs font-medium text-main truncate">
-                              {tx.category_name || (isIncome ? 'General Income' : 'Expense')}
-                            </span>
-                            <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-white/5 text-muted border border-white/5">
-                              {tx.payment_mode}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2 text-[11px] text-muted truncate">
-                            <span className="font-mono">{tx.occurred_on}</span>
-                            {tx.note && <span>• {tx.note}</span>}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          <span
-                            className={`font-mono text-xs font-medium ${
-                              isIncome ? 'text-semantic-profit' : 'text-main'
-                            }`}
-                          >
-                            {isIncome ? '+' : '-'}{formatINR(tx.amount_paise)}
-                          </span>
-
-                          <button
-                            type="button"
-                            onClick={() => deleteTxMutation.mutate(tx.id)}
-                            disabled={deleteTxMutation.isPending}
-                            className="text-muted/60 hover:text-semantic-loss p-1 rounded transition-colors"
-                            title="Delete transaction"
-                            aria-label="Delete transaction"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </GlassCard>
-            </motion.section>
+            <section className="transactions-section">
+              <div className="section-heading"><div><span className="eyebrow">THE LATEST</span><h2>Recent transactions</h2></div><span className="count-chip">{transactions.slice(0, 10).length} this month</span></div>
+              {transactions.length === 0 ? <div className="transaction-empty"><p>No spends logged for {formatMonthName(selectedMonth)}.</p><button type="button" onClick={() => { setQuickAddType('expense'); setIsQuickAddOpen(true); }}>Add your first spend</button></div> : <div className="transaction-list">{recentGroups.map(([date, entries]) => <div className="transaction-day" key={date}><h3>{date === new Date().toISOString().slice(0, 10) ? 'Today' : new Date(`${date}T12:00:00`).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })}</h3>{entries.map((tx) => {
+                const isIncome = tx.type === 'income';
+                return <div className="transaction-row" key={tx.id}>
+                  <MerchantLogo name={tx.note} note={tx.note} category={tx.category_name || ''} />
+                  <div className="transaction-info"><strong>{tx.note || tx.category_name || (isIncome ? 'Income' : 'Spend')}</strong><span>{tx.category_name || (isIncome ? 'Income' : 'Expense')}</span></div>
+                  <div className="transaction-amount"><strong className={isIncome ? 'income-amount' : ''}>{isIncome ? '+' : '−'}{formatINR(tx.amount_paise)}</strong><span>{tx.payment_mode}</span></div>
+                  <button type="button" className="delete-transaction" onClick={() => deleteTxMutation.mutate(tx.id)} disabled={deleteTxMutation.isPending} aria-label="Delete transaction">×</button>
+                </div>;
+              })}</div>)}</div>}
+            </section>
           </>
         )}
       </div>
-
-      {/* Floating Action Buttons */}
-      <Fab
-        onAddExpense={() => {
-          setQuickAddType('expense');
-          setIsQuickAddOpen(true);
-        }}
-        onAddIncome={() => {
-          setQuickAddType('income');
-          setIsQuickAddOpen(true);
-        }}
-      />
-
-      {/* Quick Add Bottom Sheet */}
-      <QuickAddSheet
-        isOpen={isQuickAddOpen}
-        onClose={() => setIsQuickAddOpen(false)}
-        initialType={quickAddType}
-        categories={categories}
-        onSuccess={refreshAllData}
-      />
-
-      {/* Budget Configuration Modal */}
-      <BudgetModal
-        isOpen={isBudgetModalOpen}
-        onClose={() => setIsBudgetModalOpen(false)}
-        month={selectedMonth}
-        categories={categories}
-        onSuccess={refreshAllData}
-      />
-    </div>
+      <Fab onHome={() => window.scrollTo({ top: 0, behavior: 'smooth' })} onAddExpense={() => { setQuickAddType('expense'); setIsQuickAddOpen(true); }} onAddIncome={() => { setQuickAddType('income'); setIsQuickAddOpen(true); }} />
+      <QuickAddSheet isOpen={isQuickAddOpen} onClose={() => setIsQuickAddOpen(false)} initialType={quickAddType} categories={categories} onSuccess={refreshAllData} />
+      <BudgetModal isOpen={isBudgetModalOpen} onClose={() => setIsBudgetModalOpen(false)} month={selectedMonth} categories={categories} onSuccess={refreshAllData} />
+    </main>
   );
 }
-
