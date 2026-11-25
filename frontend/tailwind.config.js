@@ -34,8 +34,8 @@ export default {
       },
       fontFamily: {
         serif: ['"Instrument Serif"', 'Georgia', 'serif'],
-        sans: ['Inter', 'system-ui', 'sans-serif'],
-        mono: ['"JetBrains Mono"', 'monospace'],
+        sans: ['Satoshi', 'system-ui', 'sans-serif'],
+        mono: ['Satoshi', 'system-ui', 'sans-serif'],
       },
       borderRadius: {
         '2xl': '1rem',

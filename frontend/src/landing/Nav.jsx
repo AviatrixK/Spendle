@@ -36,7 +36,7 @@ export default function Nav() {
         isVisible ? 'translate-y-0' : '-translate-y-full'
       } ${hasScrolled ? 'bg-[#0E0E11]/80 backdrop-blur-md border-b border-white/5 py-3' : 'py-5'}`}
     >
-      <div className="max-w-[1100px] mx-auto px-6 flex items-center justify-between">
+      <div className="landing-nav-inner">
         {/* Wordmark with Travelling Dot Anchor */}
         <Link to="/" className="flex items-baseline gap-0.5 group">
           <span className="font-serif text-2xl tracking-tight text-main font-medium">
@@ -57,7 +57,7 @@ export default function Nav() {
             Sign in
           </Link>
           <Link
-            to="/login"
+            to="/login?mode=signup"
             data-magnetic
             className="px-4 py-2 rounded-full bg-accent text-[#0E0E11] text-xs font-semibold hover:bg-accent-hover transition-all active:scale-95 shadow-md shadow-accent/20"
           >

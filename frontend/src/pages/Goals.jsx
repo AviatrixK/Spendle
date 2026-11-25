@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import GlassCard from '../components/GlassCard';
@@ -7,6 +7,8 @@ import ProgressBar from '../components/ProgressBar';
 import GoalModal from '../components/GoalModal';
 import { formatINR, prevMonthKey, monthKey, formatMonthName } from '../lib/format';
 import { goalApi } from '../api';
+import SpendleLoader from '../components/SpendleLoader';
+import Fab from '../components/Fab';
 
 export default function Goals() {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -16,6 +18,7 @@ export default function Goals() {
   const [closeErrorMsg, setCloseErrorMsg] = useState('');
 
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   // Load Goals list (ordered by priority ASC, created_at ASC)
   const { data: goals = [], isLoading, error } = useQuery({
@@ -181,9 +184,7 @@ export default function Goals() {
 
         {/* Goals List */}
         {isLoading ? (
-          <div className="text-center py-16 text-muted text-sm animate-pulse font-mono">
-            Loading savings goals...
-          </div>
+          <SpendleLoader label="Gathering your goals" />
         ) : error ? (
           <GlassCard className="p-6 text-center text-semantic-loss text-sm">
             {error.message || 'Failed to load savings goals'}
@@ -342,6 +343,11 @@ export default function Goals() {
           queryClient.invalidateQueries({ queryKey: ['goals'] });
           queryClient.invalidateQueries({ queryKey: ['dashboard'] });
         }}
+      />
+      <Fab
+        onHome={() => navigate('/')}
+        onAddExpense={() => navigate('/?quickAdd=expense')}
+        onAddIncome={() => navigate('/?quickAdd=income')}
       />
     </div>
   );

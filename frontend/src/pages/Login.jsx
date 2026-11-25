@@ -24,6 +24,7 @@ export default function Login() {
 
   // Parse URL search parameters on mount (e.g. OAuth error or direct verification link)
   useEffect(() => {
+    if (searchParams.get('mode') === 'signup') setMode('signup');
     const errorParam = searchParams.get('error');
     if (errorParam) {
       if (errorParam === 'google_auth_failed' || errorParam === 'oauth_token_error') {
@@ -212,6 +213,7 @@ export default function Login() {
                     <input
                       id="login-name"
                       type="text"
+                      autoComplete="name"
                       placeholder="e.g. Mayank Rawat"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
@@ -228,9 +230,10 @@ export default function Login() {
                   >
                     Email Address
                   </label>
-                  <input
+                    <input
                     id="login-email"
                     type="email"
+                      autoComplete="email"
                     placeholder="you@example.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -261,12 +264,14 @@ export default function Login() {
                     <input
                       id="login-password"
                       type={showPassword ? 'text' : 'password'}
+                      autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
                       placeholder="At least 8 characters"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       className="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-main placeholder:text-muted/60 outline-none focus:border-accent font-mono pr-12"
                       required
                     />
+                    {mode === 'signup' && <span className="mt-1 block text-xs text-muted" id="password-help">Use at least 8 characters.</span>}
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
@@ -288,6 +293,7 @@ export default function Login() {
                     <input
                       id="login-confirm-password"
                       type={showPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
                       placeholder="Repeat your password"
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
@@ -299,6 +305,8 @@ export default function Login() {
 
                 {errorMessage && (
                   <motion.p
+                    role="alert"
+                    aria-live="polite"
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
                     className="text-xs text-semantic-loss bg-semantic-loss/10 border border-semantic-loss/20 rounded-xl p-3 text-center"
